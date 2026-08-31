@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -43,6 +44,7 @@ class FakeRunner:
         self.sessions: list[AgentSession] = []
         self.spawned = 0
         self.triggered: list[str] = []
+        self.cancelled_reviews: list[str] = []
         self.terminated: list[str] = []
         self.spawn_calls: list[tuple[str, str | None]] = []
         self.spawn_details: list[tuple[str, str | None]] = []
@@ -75,6 +77,9 @@ class FakeRunner:
 
     def trigger_review(self, session_id: str) -> None:
         self.triggered.append(session_id)
+
+    def cancel_review(self, session_id: str) -> None:
+        self.cancelled_reviews.append(session_id)
 
     def send(self, session_id: str, message: str) -> None:
         pass
@@ -122,6 +127,17 @@ def config(*, shadow: bool, approval_labels: set[str] | None = None) -> AppConfi
 
 def run_config(thread_id: str) -> dict:
     return {"configurable": {"thread_id": thread_id}}
+
+
+class Clock:
+    def __init__(self, value: datetime) -> None:
+        self.value = value
+
+    def __call__(self) -> datetime:
+        return self.value
+
+    def advance(self, seconds: float) -> None:
+        self.value += timedelta(seconds=seconds)
 
 
 def test_shadow_mode_plans_without_spawning() -> None:
@@ -202,6 +218,245 @@ def test_repository_qualified_ao_issue_id_reuses_numeric_dispatch_worker() -> No
 
     assert result["worker_id"] == "qualified-worker"
     assert runner.spawned == 0
+
+
+def test_review_watchdog_restarts_a_timed_out_run_once() -> None:
+    started = datetime(2026, 9, 1, tzinfo=UTC)
+    clock = Clock(started)
+    item = WorkItem("1", "code")
+    runner = FakeRunner(
+        item,
+        ReviewResult(
+            status="running",
+            target_sha="abc",
+            run_id="run-1",
+            started_at=started.isoformat(),
+        ),
+    )
+    tracker = FakeTracker(item)
+    app_config = config(shadow=False)
+    app_config.supervisor.review_timeout_seconds = 60
+    app_config.supervisor.review_max_attempts = 2
+    graph = build_supervisor_graph(
+        SupervisorDependencies(app_config, runner, tracker, now=clock), InMemorySaver()
+    )
+    invocation = run_config("review-timeout")
+
+    first = graph.invoke(
+        {"project_id": "demo", "work_item_id": "1", "events": []},
+        config=invocation,
+    )
+    assert first["status"] == "review_pending"
+    assert first["review_attempts"] == 1
+    assert runner.triggered == []
+
+    clock.advance(61)
+    restarted = graph.invoke(
+        {"project_id": "demo", "work_item_id": "1", "events": []},
+        config=invocation,
+    )
+
+    assert restarted["status"] == "review_pending"
+    assert restarted["review_attempts"] == 2
+    assert runner.cancelled_reviews == ["worker-1"]
+    assert runner.triggered == ["worker-1"]
+
+
+def test_review_watchdog_stalls_after_bounded_attempts() -> None:
+    started = datetime(2026, 9, 1, tzinfo=UTC)
+    clock = Clock(started)
+    item = WorkItem("1", "code")
+    runner = FakeRunner(
+        item,
+        ReviewResult(
+            status="running",
+            target_sha="abc",
+            run_id="run-1",
+            started_at=started.isoformat(),
+        ),
+    )
+    tracker = FakeTracker(item)
+    app_config = config(shadow=False)
+    app_config.supervisor.review_timeout_seconds = 60
+    app_config.supervisor.review_max_attempts = 2
+    graph = build_supervisor_graph(
+        SupervisorDependencies(app_config, runner, tracker, now=clock), InMemorySaver()
+    )
+    invocation = run_config("review-stalled")
+
+    graph.invoke(
+        {"project_id": "demo", "work_item_id": "1", "events": []},
+        config=invocation,
+    )
+    clock.advance(61)
+    graph.invoke(
+        {"project_id": "demo", "work_item_id": "1", "events": []},
+        config=invocation,
+    )
+    clock.advance(61)
+    stalled = graph.invoke(
+        {"project_id": "demo", "work_item_id": "1", "events": []},
+        config=invocation,
+    )
+
+    assert stalled["status"] == "review_stalled"
+    assert stalled["review_attempts"] == 2
+    assert "timed out after 2 attempt(s)" in stalled["last_error"]
+    assert runner.cancelled_reviews == ["worker-1"]
+    assert runner.triggered == ["worker-1"]
+
+
+def test_external_new_review_run_recovers_a_stalled_workflow() -> None:
+    started = datetime(2026, 9, 1, tzinfo=UTC)
+    clock = Clock(started)
+    item = WorkItem("1", "code")
+    runner = FakeRunner(
+        item,
+        ReviewResult(
+            status="running",
+            target_sha="abc",
+            run_id="run-1",
+            started_at=started.isoformat(),
+        ),
+    )
+    tracker = FakeTracker(item)
+    app_config = config(shadow=False)
+    app_config.supervisor.review_timeout_seconds = 60
+    app_config.supervisor.review_max_attempts = 1
+    graph = build_supervisor_graph(
+        SupervisorDependencies(app_config, runner, tracker, now=clock), InMemorySaver()
+    )
+    invocation = run_config("review-manual-recovery")
+
+    graph.invoke(
+        {"project_id": "demo", "work_item_id": "1", "events": []},
+        config=invocation,
+    )
+    clock.advance(61)
+    stalled = graph.invoke(
+        {"project_id": "demo", "work_item_id": "1", "events": []},
+        config=invocation,
+    )
+    assert stalled["status"] == "review_stalled"
+
+    runner.review = replace(
+        runner.review,
+        run_id="run-2",
+        started_at=clock().isoformat(),
+    )
+    recovered = graph.invoke(
+        {"project_id": "demo", "work_item_id": "1", "events": []},
+        config=invocation,
+    )
+
+    assert recovered["status"] == "review_pending"
+    assert recovered["review_run_id"] == "run-2"
+    assert recovered["review_attempts"] == 1
+    assert recovered["last_error"] == ""
+
+
+def test_new_review_target_resets_the_attempt_budget() -> None:
+    started = datetime(2026, 9, 1, tzinfo=UTC)
+    clock = Clock(started)
+    item = WorkItem("1", "code")
+    runner = FakeRunner(
+        item,
+        ReviewResult(
+            status="running",
+            target_sha="old",
+            run_id="run-old",
+            started_at=started.isoformat(),
+        ),
+    )
+    tracker = FakeTracker(item)
+    app_config = config(shadow=False)
+    app_config.supervisor.review_timeout_seconds = 60
+    graph = build_supervisor_graph(
+        SupervisorDependencies(app_config, runner, tracker, now=clock), InMemorySaver()
+    )
+    invocation = run_config("review-new-target")
+
+    graph.invoke(
+        {"project_id": "demo", "work_item_id": "1", "events": []},
+        config=invocation,
+    )
+    clock.advance(61)
+    retried = graph.invoke(
+        {"project_id": "demo", "work_item_id": "1", "events": []},
+        config=invocation,
+    )
+    assert retried["review_attempts"] == 2
+
+    runner.review = ReviewResult(status="needs_review", target_sha="new")
+    fresh = graph.invoke(
+        {"project_id": "demo", "work_item_id": "1", "events": []},
+        config=invocation,
+    )
+
+    assert fresh["status"] == "review_pending"
+    assert fresh["review_triggered_for_sha"] == "new"
+    assert fresh["review_attempts"] == 1
+    assert runner.triggered == ["worker-1", "worker-1"]
+
+
+def test_failed_review_retries_immediately_without_cancel() -> None:
+    started = datetime(2026, 9, 1, tzinfo=UTC)
+    clock = Clock(started)
+    item = WorkItem("1", "code")
+    runner = FakeRunner(
+        item,
+        ReviewResult(
+            status="failed",
+            target_sha="abc",
+            run_id="failed-run",
+            started_at=started.isoformat(),
+        ),
+    )
+    tracker = FakeTracker(item)
+    app_config = config(shadow=False)
+    graph = build_supervisor_graph(
+        SupervisorDependencies(app_config, runner, tracker, now=clock), InMemorySaver()
+    )
+
+    result = graph.invoke(
+        {"project_id": "demo", "work_item_id": "1", "events": []},
+        config=run_config("review-failed"),
+    )
+
+    assert result["status"] == "review_pending"
+    assert result["review_attempts"] == 2
+    assert runner.cancelled_reviews == []
+    assert runner.triggered == ["worker-1"]
+
+
+def test_missing_review_record_is_retriggered_after_timeout() -> None:
+    started = datetime(2026, 9, 1, tzinfo=UTC)
+    clock = Clock(started)
+    item = WorkItem("1", "code")
+    runner = FakeRunner(item, ReviewResult(status="needs_review", target_sha="abc"))
+    tracker = FakeTracker(item)
+    app_config = config(shadow=False)
+    app_config.supervisor.review_timeout_seconds = 60
+    graph = build_supervisor_graph(
+        SupervisorDependencies(app_config, runner, tracker, now=clock), InMemorySaver()
+    )
+    invocation = run_config("review-missing")
+
+    graph.invoke(
+        {"project_id": "demo", "work_item_id": "1", "events": []},
+        config=invocation,
+    )
+    runner.review = None
+    clock.advance(61)
+    result = graph.invoke(
+        {"project_id": "demo", "work_item_id": "1", "events": []},
+        config=invocation,
+    )
+
+    assert result["status"] == "review_pending"
+    assert result["review_attempts"] == 2
+    assert runner.triggered == ["worker-1", "worker-1"]
+    assert runner.cancelled_reviews == []
 
 
 def test_approved_change_merges_and_cleans_worker() -> None:

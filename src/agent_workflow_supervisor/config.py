@@ -13,6 +13,8 @@ class SupervisorConfig(BaseModel):
     database_path: Path = Path(".state/checkpoints.sqlite")
     runtime_dir: Path = Path(".state/runtime")
     poll_interval_seconds: float = Field(default=5.0, ge=1.0, le=300.0)
+    review_timeout_seconds: float = Field(default=1800.0, ge=60.0, le=86400.0)
+    review_max_attempts: int = Field(default=2, ge=1, le=10)
     shadow_mode: bool = True
 
 

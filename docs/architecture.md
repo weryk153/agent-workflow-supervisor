@@ -45,7 +45,10 @@ The credential key first consults the AO execution project's dynamic binding,
 then falls back to the profile configuration. Consequently, rebinding a base
 AO project cannot make that project and a derived project count the same Claude
 login under two names.
-- Reconciles AO review state.
+- Reconciles AO review state. Review run identity, start time, target SHA, and
+  attempt count are checkpointed. A watchdog restarts a missing, failed, or
+  timed-out run within a bounded budget and then exposes `review_stalled`
+  instead of waiting silently forever.
 - Verifies that review approval matches the current pull-request head SHA.
 - Checks draft, mergeability, merge state, and status checks.
 - Interrupts for protected human approval. The queue accepts a decision only
@@ -110,6 +113,10 @@ new work from repository labels and does not scan the issue tracker.
 A supervisor crash does not erase AO sessions or the workflow checkpoint. On
 restart, reconciliation resumes from the stored thread and attempts to reuse an
 active matching worker.
+
+Review watchdog fields are additive checkpoint state. Workflows created by
+older releases adopt AO's current review run and its `createdAt` timestamp on
+their next reconciliation, so upgrading does not require deleting checkpoints.
 
 Account-pool updates retain inactive credential profile records for discovery
 but remove them from future routing. This lets an existing worker in a retired

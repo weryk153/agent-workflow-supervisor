@@ -33,6 +33,8 @@ repository = "owner/repo"
     assert config.runner.type == "ao"
     assert config.policy.default_harness == "claude-code"
     assert config.policy.report_only_harnesses == set()
+    assert config.supervisor.review_timeout_seconds == 1800
+    assert config.supervisor.review_max_attempts == 2
 
 
 def test_load_config_accepts_isolated_credential_profiles(tmp_path: Path) -> None:

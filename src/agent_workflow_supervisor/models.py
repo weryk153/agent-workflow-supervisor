@@ -48,6 +48,8 @@ class ReviewResult:
     change_id: str | None = None
     change_url: str = ""
     target_sha: str = ""
+    run_id: str = ""
+    started_at: str = ""
 
 
 @dataclass(frozen=True)

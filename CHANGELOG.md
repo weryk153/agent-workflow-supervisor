@@ -4,6 +4,30 @@ Notable changes are documented here. This project follows semantic versioning
 after its first stable release; pre-1.0 releases may still change configuration
 with an explicit migration note.
 
+## 0.1.1 - 2026-09-01
+
+### Fixed
+
+- Added a durable AO review watchdog so a missing, failed, or timed-out
+  reviewer cannot leave a workflow silently stuck in `review_pending`.
+- Limited automatic review attempts and exposed exhausted workflows as
+  `review_stalled` with the cause visible through `oa status`.
+- Recognized AO's latest review-run status instead of allowing a stale
+  aggregate `needs_review` value to hide a failed run.
+
+### Added
+
+- Configurable `review_timeout_seconds` and `review_max_attempts` supervisor
+  settings, defaulting to 30 minutes and two total attempts.
+- Recovery for an explicitly triggered AO review or a new pull-request head,
+  both of which receive a fresh bounded attempt budget.
+
+### Compatibility
+
+- Existing project TOML files and LangGraph checkpoints require no migration.
+  Missing settings use the new defaults, and old review state adopts AO's
+  current run metadata on the next reconciliation.
+
 ## 0.1.0 - 2026-09-01
 
 ### Added

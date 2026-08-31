@@ -238,6 +238,19 @@ class NewGateGraph:
         }
 
 
+class StalledGraph:
+    def get_state(self, _invocation: dict) -> Snapshot:
+        return Snapshot()
+
+    def invoke(self, _input: dict, *, config: dict) -> dict:
+        return {
+            "project_id": "demo",
+            "work_item_id": "42",
+            "status": "review_stalled",
+            "last_error": "review timed out after 2 attempt(s)",
+        }
+
+
 def test_stale_claim_cannot_rebind_to_new_gate(monkeypatch, tmp_path: Path) -> None:
     store = JobStore(tmp_path)
     store.dispatch("42")
@@ -270,6 +283,24 @@ def test_stale_claim_cannot_rebind_to_new_gate(monkeypatch, tmp_path: Path) -> N
     assert rebound.approval is None
     assert rebound.approval_change_id == "8"
     assert rebound.approval_target_sha == "B"
+
+
+def test_graph_liveness_error_is_exposed_by_service_status(monkeypatch, tmp_path: Path) -> None:
+    store = JobStore(tmp_path)
+    job = store.dispatch("42")
+
+    @contextmanager
+    def fake_graph_runtime(_config: AppConfig):
+        yield StalledGraph()
+
+    monkeypatch.setattr(service_module, "graph_runtime", fake_graph_runtime)
+    reconcile_job(_service_config(tmp_path), store, job)
+
+    stalled = store.get("42")
+    assert stalled is not None
+    assert stalled.active
+    assert stalled.status == "review_stalled"
+    assert stalled.last_error == "review timed out after 2 attempt(s)"
 
 
 def test_invalid_legacy_work_item_id_is_persisted_as_retry_error(tmp_path: Path) -> None:

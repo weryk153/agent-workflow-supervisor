@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from operator import add
 from pathlib import Path
 from typing import Annotated, Any, TypedDict
@@ -36,6 +38,10 @@ from agent_workflow_supervisor.policy import (
 from agent_workflow_supervisor.ports import RunnerPort, TrackerPort
 
 
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
 class SupervisorState(TypedDict, total=False):
     project_id: str
     work_item_id: str
@@ -55,6 +61,10 @@ class SupervisorState(TypedDict, total=False):
     review_verdict: str
     review_target_sha: str
     review_triggered_for_sha: str
+    review_worker_id: str
+    review_run_id: str
+    review_started_at: str
+    review_attempts: int
     change_id: str
     change_url: str
     change_head_sha: str
@@ -75,6 +85,7 @@ class SupervisorDependencies:
     config: AppConfig
     runner: RunnerPort
     tracker: TrackerPort
+    now: Callable[[], datetime] = _utc_now
 
 
 def _item_from_state(state: SupervisorState) -> WorkItem:
@@ -93,6 +104,27 @@ def build_supervisor_graph(deps: SupervisorDependencies, checkpointer: Any = Non
     config = deps.config
     runner = deps.runner
     tracker = deps.tracker
+
+    def now_utc() -> datetime:
+        value = deps.now()
+        if value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
+
+    def iso_now() -> str:
+        return now_utc().isoformat()
+
+    def review_timed_out(started_at: str) -> bool:
+        if not started_at:
+            return False
+        try:
+            parsed = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+        except ValueError:
+            return False
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=UTC)
+        age = (now_utc() - parsed.astimezone(UTC)).total_seconds()
+        return age >= config.supervisor.review_timeout_seconds
 
     def execution_project_ids() -> list[str]:
         ids = [config.project.id]
@@ -328,6 +360,7 @@ def build_supervisor_graph(deps: SupervisorDependencies, checkpointer: Any = Non
             "body": item.body,
             "labels": sorted(item.labels),
             "work_item_url": item.url,
+            "last_error": "",
             "status": "loaded",
             "events": [f"loaded work item {item.id}"],
         }
@@ -705,6 +738,42 @@ def build_supervisor_graph(deps: SupervisorDependencies, checkpointer: Any = Non
 
         review = runner.get_review(worker.id)
         if review is None:
+            same_worker = state.get("review_worker_id") == worker.id
+            started_at = state.get("review_started_at", "")
+            attempts = state.get("review_attempts", 0)
+            review_key = state.get("review_triggered_for_sha", "")
+            if same_worker and review_key and attempts and review_timed_out(started_at):
+                if config.supervisor.shadow_mode:
+                    return {
+                        **base,
+                        "review_started_at": iso_now(),
+                        "status": "review_pending",
+                        "events": [f"shadow: would restart missing review for {worker.id}"],
+                    }
+                if attempts >= config.supervisor.review_max_attempts:
+                    return {
+                        **base,
+                        "status": "review_stalled",
+                        "last_error": (
+                            f"review for {worker.id} at {review_key} disappeared or did not "
+                            f"complete after {attempts} attempt(s)"
+                        ),
+                        "events": ["review watchdog exhausted its retry budget"],
+                    }
+                runner.trigger_review(worker.id)
+                return {
+                    **base,
+                    "review_worker_id": worker.id,
+                    "review_run_id": "",
+                    "review_started_at": iso_now(),
+                    "review_attempts": attempts + 1,
+                    "status": "review_pending",
+                    "events": [
+                        f"restarted missing review for {worker.id} (attempt {attempts + 1})"
+                    ],
+                }
+            if same_worker and review_key and attempts:
+                return {**base, "status": "review_pending"}
             return {**base, "status": "worker_running"}
 
         base.update(
@@ -713,7 +782,15 @@ def build_supervisor_graph(deps: SupervisorDependencies, checkpointer: Any = Non
             review_target_sha=review.target_sha,
         )
         if review.verdict == "changes_requested":
-            return {**base, "status": "changes_requested"}
+            return {
+                **base,
+                "review_worker_id": worker.id,
+                "review_run_id": "",
+                "review_triggered_for_sha": "",
+                "review_started_at": "",
+                "review_attempts": 0,
+                "status": "changes_requested",
+            }
 
         if review.verdict == "approved" and review.change_id and not review.target_sha:
             return {
@@ -733,19 +810,127 @@ def build_supervisor_graph(deps: SupervisorDependencies, checkpointer: Any = Non
                 "status": "review_approved",
             }
 
-        if review.status == "needs_review":
-            review_key = review.target_sha or f"{worker.id}:unknown"
-            if state.get("review_triggered_for_sha") != review_key:
-                if not config.supervisor.shadow_mode:
-                    runner.trigger_review(worker.id)
-                base["review_triggered_for_sha"] = review_key
-                base["events"] = [
-                    f"{'shadow: would trigger' if config.supervisor.shadow_mode else 'triggered'} "
-                    f"review for {worker.id}"
-                ]
-            return {**base, "status": "review_pending"}
+        review_status = review.status.casefold()
+        review_key = review.target_sha or f"{worker.id}:unknown"
+        same_review = (
+            state.get("review_worker_id") == worker.id
+            and state.get("review_triggered_for_sha") == review_key
+        )
+        attempts = state.get("review_attempts", 0) if same_review else 0
+        started_at = state.get("review_started_at", "") if same_review else ""
+        run_id = state.get("review_run_id", "") if same_review else ""
 
-        return {**base, "status": "review_pending"}
+        # A run created outside the supervisor after a stalled/known run is an
+        # explicit recovery action. Give that new run a fresh bounded budget.
+        if same_review and run_id and review.run_id and run_id != review.run_id:
+            attempts = 1
+            started_at = review.started_at or iso_now()
+            run_id = review.run_id
+
+        failure_statuses = {"cancelled", "canceled", "error", "failed", "terminated"}
+        if review_status in failure_statuses:
+            attempts = max(attempts, 1)
+            if config.supervisor.shadow_mode:
+                return {
+                    **base,
+                    "review_worker_id": worker.id,
+                    "review_run_id": review.run_id,
+                    "review_triggered_for_sha": review_key,
+                    "review_started_at": review.started_at or iso_now(),
+                    "review_attempts": attempts,
+                    "status": "review_pending",
+                    "events": [f"shadow: would restart failed review for {worker.id}"],
+                }
+            if attempts >= config.supervisor.review_max_attempts:
+                return {
+                    **base,
+                    "review_worker_id": worker.id,
+                    "review_run_id": review.run_id,
+                    "review_triggered_for_sha": review_key,
+                    "review_started_at": started_at or review.started_at or iso_now(),
+                    "review_attempts": attempts,
+                    "status": "review_stalled",
+                    "last_error": (
+                        f"review for {worker.id} at {review_key} ended as {review_status} "
+                        f"after {attempts} attempt(s)"
+                    ),
+                    "events": ["review watchdog exhausted its retry budget"],
+                }
+            runner.trigger_review(worker.id)
+            return {
+                **base,
+                "review_worker_id": worker.id,
+                "review_run_id": "",
+                "review_triggered_for_sha": review_key,
+                "review_started_at": iso_now(),
+                "review_attempts": attempts + 1,
+                "status": "review_pending",
+                "events": [f"restarted failed review for {worker.id} (attempt {attempts + 1})"],
+            }
+
+        if review_status == "needs_review" and attempts == 0:
+            if not config.supervisor.shadow_mode:
+                runner.trigger_review(worker.id)
+            return {
+                **base,
+                "review_worker_id": worker.id,
+                "review_run_id": "",
+                "review_triggered_for_sha": review_key,
+                "review_started_at": iso_now(),
+                "review_attempts": 1,
+                "status": "review_pending",
+                "events": [
+                    f"{'shadow: would trigger' if config.supervisor.shadow_mode else 'triggered'} "
+                    f"review for {worker.id} (attempt 1)"
+                ],
+            }
+
+        if attempts == 0:
+            # AO may already have started the review before the supervisor saw
+            # it. Adopt that run so it receives the same timeout protection.
+            attempts = 1
+            started_at = review.started_at or iso_now()
+            run_id = review.run_id
+
+        if not config.supervisor.shadow_mode and review_timed_out(started_at):
+            if attempts >= config.supervisor.review_max_attempts:
+                return {
+                    **base,
+                    "review_worker_id": worker.id,
+                    "review_run_id": run_id or review.run_id,
+                    "review_triggered_for_sha": review_key,
+                    "review_started_at": started_at,
+                    "review_attempts": attempts,
+                    "status": "review_stalled",
+                    "last_error": (
+                        f"review for {worker.id} at {review_key} timed out after "
+                        f"{attempts} attempt(s)"
+                    ),
+                    "events": ["review watchdog exhausted its retry budget"],
+                }
+            if review_status != "needs_review":
+                runner.cancel_review(worker.id)
+            runner.trigger_review(worker.id)
+            return {
+                **base,
+                "review_worker_id": worker.id,
+                "review_run_id": "",
+                "review_triggered_for_sha": review_key,
+                "review_started_at": iso_now(),
+                "review_attempts": attempts + 1,
+                "status": "review_pending",
+                "events": [f"restarted timed-out review for {worker.id} (attempt {attempts + 1})"],
+            }
+
+        return {
+            **base,
+            "review_worker_id": worker.id,
+            "review_run_id": run_id or review.run_id,
+            "review_triggered_for_sha": review_key,
+            "review_started_at": started_at,
+            "review_attempts": attempts,
+            "status": "review_pending",
+        }
 
     def verify_change(state: SupervisorState) -> dict[str, Any]:
         expected_sha = state.get("review_target_sha", "")

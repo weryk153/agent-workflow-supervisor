@@ -673,6 +673,7 @@ def reconcile_job(config: AppConfig, store: JobStore, job: QueuedWork) -> None:
             job.work_item_id,
             status=status,
             active=status not in TERMINAL_STATUSES,
+            last_error=str(result.get("last_error") or "") or None,
             # Publishing any gate always starts with no queued decision. The
             # user must authorize the exact change/head after it is visible.
             clear_approval=True,

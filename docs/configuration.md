@@ -71,11 +71,19 @@ profiles.
 database_path = ".state/checkpoints.sqlite"
 runtime_dir = ".state/runtime"
 poll_interval_seconds = 5
+review_timeout_seconds = 1800
+review_max_attempts = 2
 shadow_mode = true
 ```
 
 - Relative database and runtime paths resolve from the project TOML directory.
 - Poll intervals must be between 1 and 300 seconds.
+- A review attempt that remains incomplete for `review_timeout_seconds` is
+  cancelled and restarted. The default is 30 minutes.
+- `review_max_attempts` includes the initial attempt. After the bounded budget
+  is exhausted, the workflow stays active as `review_stalled` without starting
+  more reviewers. A new commit or an explicitly started AO review resets the
+  budget.
 - Shadow mode blocks external mutations but still permits reads.
 
 ### Project, runner, and tracker

@@ -287,6 +287,12 @@ checkpoint database merely to hide an unexplained mismatch.
 
 ## Review is stale or merge waits
 
+- `review_pending`: AO has a review that is still inside its configured
+  timeout and retry budget.
+- `review_stalled`: a review disappeared, failed, or exceeded
+  `review_timeout_seconds` for every allowed attempt. `oa status` includes the
+  exact reason. The supervisor keeps monitoring but does not create unbounded
+  reviewers.
 - `review_invalid`: an approved review did not identify its target head SHA;
   the supervisor cannot prove what was reviewed and will not merge it.
 - `review_stale`: the approved review target SHA no longer matches the PR head.
@@ -300,6 +306,19 @@ Check GitHub directly:
 gh pr view <number> --repo owner/repository \
   --json headRefOid,isDraft,mergeable,mergeStateStatus,statusCheckRollup
 ```
+
+For a stalled review, inspect AO before intervening:
+
+```bash
+ao review ls <worker-session-id> --json
+ao session get <worker-session-id> --json
+```
+
+If no reviewer is actually running, an explicit `ao review trigger
+<worker-session-id>` creates a new AO run. The supervisor recognizes its new
+run id and gives it a fresh bounded watchdog budget. A new pull-request head
+SHA also starts a fresh budget automatically. Restarting AO or deleting the
+LangGraph database is not the normal recovery path.
 
 The supervisor will not treat an approval for an older or unidentified commit
 as current. After protected human approval, it fetches the change again and

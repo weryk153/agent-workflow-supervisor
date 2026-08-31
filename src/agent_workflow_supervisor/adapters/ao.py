@@ -111,15 +111,20 @@ class AoRunner:
             verdict = "unknown"
         change_id = raw.get("prNumber")
         return ReviewResult(
-            status=str(raw.get("status") or latest.get("status") or "unknown"),
+            status=str(latest.get("status") or raw.get("status") or "unknown"),
             verdict=verdict,  # type: ignore[arg-type]
             change_id=str(change_id) if change_id is not None else None,
             change_url=str(raw.get("prUrl") or ""),
             target_sha=str(raw.get("targetSha") or ""),
+            run_id=str(latest.get("id") or ""),
+            started_at=str(latest.get("createdAt") or ""),
         )
 
     def trigger_review(self, session_id: str) -> None:
         self.cli.run("review", "trigger", session_id)
+
+    def cancel_review(self, session_id: str) -> None:
+        self.cli.run("review", "cancel", session_id)
 
     def send(self, session_id: str, message: str) -> None:
         self.cli.run("send", "--session", session_id, "--message", message)

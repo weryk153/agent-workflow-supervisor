@@ -48,3 +48,48 @@ def test_spawn_uses_supported_mode(monkeypatch, harness: str, expected_mode: str
     call = runner.cli.calls[0]
     assert call[call.index("--mode") + 1] == expected_mode
     assert session.harness == harness
+
+
+class ReviewCommandAdapter:
+    def __init__(self, _command: str) -> None:
+        self.calls: list[tuple[str, ...]] = []
+
+    def run(self, *args: str) -> str:
+        self.calls.append(args)
+        return ""
+
+    def run_json(self, *args: str) -> dict:
+        self.calls.append(args)
+        return {
+            "reviews": [
+                {
+                    "status": "needs_review",
+                    "prNumber": 12,
+                    "prUrl": "https://github.com/owner/repo/pull/12",
+                    "targetSha": "abc",
+                    "latestRun": {
+                        "id": "run-7",
+                        "status": "failed",
+                        "verdict": "unknown",
+                        "createdAt": "2026-09-01T00:00:00Z",
+                    },
+                }
+            ]
+        }
+
+
+def test_review_uses_latest_run_liveness_and_can_cancel(monkeypatch) -> None:
+    monkeypatch.setattr(ao_module, "CommandAdapter", ReviewCommandAdapter)
+    runner = AoRunner("ao")
+
+    review = runner.get_review("demo-1")
+    runner.cancel_review("demo-1")
+
+    assert review is not None
+    assert review.status == "failed"
+    assert review.run_id == "run-7"
+    assert review.started_at == "2026-09-01T00:00:00Z"
+    assert runner.cli.calls == [
+        ("review", "ls", "demo-1", "--json"),
+        ("review", "cancel", "demo-1"),
+    ]
