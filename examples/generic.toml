@@ -1,0 +1,53 @@
+[supervisor]
+database_path = ".state/checkpoints.sqlite"
+runtime_dir = ".state/runtime"
+poll_interval_seconds = 5
+shadow_mode = true
+
+[project]
+id = "my-project"
+
+[runner]
+type = "ao"
+command = "ao"
+
+[tracker]
+type = "github"
+command = "gh"
+repository = "owner/repository"
+
+[policy]
+default_harness = "claude-code"
+skip_labels = ["agent:skip"]
+approval_labels = ["approval:required"]
+
+[policy.capacity]
+claude-code = 1
+
+# Optional: route Claude workers across isolated logins. Each profile points to
+# a distinct AO project registered from a distinct local clone. Configure that
+# AO project's CLAUDE_CONFIG_DIR before enabling these lines.
+# [credentials.profiles.claude-primary]
+# execution_project_id = "my-project-claude-primary"
+# max_workers = 1
+#
+# [credentials.profiles.claude-secondary]
+# execution_project_id = "my-project-claude-secondary"
+# max_workers = 1
+#
+# [policy.credential_profiles]
+# claude-code = ["claude-primary", "claude-secondary"]
+
+# No cross-harness role assignment is enabled by default. Add ordered routes
+# for your own labels and harnesses, for example:
+# [[policy.routes]]
+# harness = "codex"
+# labels_any = ["agent:codex"]
+
+# Global profiles assigned with `oa project models` can be selected without
+# another rule by applying the issue label `agent:<profile-name>`. Optional
+# aliases can be declared here after the profile is assigned:
+#
+# [[policy.routes]]
+# profile = "local-qwen"
+# labels_any = ["agent:local", "cost:local"]

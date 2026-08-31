@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="320" viewBox="0 0 1200 320" role="img" aria-labelledby="title desc">
+  <title id="title">Agent Workflow Supervisor architecture</title>
+  <desc id="desc">A user asks the AO orchestrator to dispatch work. The LangGraph supervisor coordinates an AO worker and reconciles delivery state from GitHub.</desc>
+  <style>
+    .edge { fill: none; stroke: #7567d8; stroke-width: 2.5; }
+    .arrowhead { fill: #7567d8; }
+    .edge-label { fill: #6459b8; }
+    .node-accent { fill: #f3f0ff; stroke: #8b7cf6; stroke-width: 2; }
+    .node-soft { fill: #f8f7fc; stroke: #8b7cf6; stroke-width: 2; }
+    .node-primary { fill: #eeeafe; stroke: #7567d8; stroke-width: 2.5; }
+    .node-title { fill: #25212f; }
+    .node-subtitle { fill: #6a6472; }
+
+    @media (prefers-color-scheme: dark) {
+      .edge { stroke: #a89bff; }
+      .arrowhead { fill: #a89bff; }
+      .edge-label { fill: #c3baff; }
+      .node-accent { fill: #262238; stroke: #a89bff; }
+      .node-soft { fill: #211f29; stroke: #a89bff; }
+      .node-primary { fill: #30294d; stroke: #a89bff; }
+      .node-title { fill: #f4f1ff; }
+      .node-subtitle { fill: #d1c9e2; }
+    }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="arrowhead" d="M 0 0 L 10 5 L 0 10 z"/>
+    </marker>
+    <filter id="shadow" x="-20%" y="-30%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#000000" flood-opacity="0.16"/>
+    </filter>
+  </defs>
+
+  <g class="edge" marker-end="url(#arrow)">
+    <path d="M 112 160 H 205"/>
+    <path d="M 405 160 H 490"/>
+    <path d="M 710 160 H 790"/>
+    <path d="M 970 160 H 1060"/>
+    <path d="M 1080 207 C 1030 278 760 286 626 218"/>
+    <path d="M 520 114 C 470 57 340 55 318 112"/>
+  </g>
+
+  <g class="edge-label" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="14" font-weight="600">
+    <text x="158" y="145" text-anchor="middle">ask in AO</text>
+    <text x="448" y="145" text-anchor="middle">dispatch</text>
+    <text x="750" y="145" text-anchor="middle">acquire</text>
+    <text x="1015" y="145" text-anchor="middle">code + PR</text>
+    <text x="862" y="279" text-anchor="middle">issue · review · CI</text>
+    <text x="420" y="65" text-anchor="middle">status · approval</text>
+  </g>
+
+  <g filter="url(#shadow)" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+    <circle class="node-accent" cx="72" cy="160" r="40"/>
+    <text class="node-title" x="72" y="166" text-anchor="middle" font-size="17" font-weight="650">You</text>
+
+    <rect class="node-soft" x="205" y="112" width="200" height="96" rx="14"/>
+    <text class="node-title" x="305" y="153" text-anchor="middle" font-size="18" font-weight="650">AO orchestrator</text>
+    <text class="node-subtitle" x="305" y="180" text-anchor="middle" font-size="13">conversation interface</text>
+
+    <rect class="node-primary" x="490" y="102" width="220" height="116" rx="16"/>
+    <text class="node-title" x="600" y="153" text-anchor="middle" font-size="19" font-weight="700">LangGraph supervisor</text>
+    <text class="node-subtitle" x="600" y="182" text-anchor="middle" font-size="13">durable control plane</text>
+
+    <rect class="node-soft" x="790" y="112" width="180" height="96" rx="14"/>
+    <text class="node-title" x="880" y="153" text-anchor="middle" font-size="18" font-weight="650">AO worker</text>
+    <text class="node-subtitle" x="880" y="180" text-anchor="middle" font-size="13">agent execution</text>
+
+    <rect class="node-accent" x="1060" y="120" width="116" height="80" rx="14"/>
+    <text class="node-title" x="1118" y="157" text-anchor="middle" font-size="18" font-weight="650">GitHub</text>
+    <text class="node-subtitle" x="1118" y="180" text-anchor="middle" font-size="12">delivery state</text>
+  </g>
+</svg>

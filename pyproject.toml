@@ -1,0 +1,51 @@
+[project]
+name = "agent-workflow-supervisor"
+version = "0.1.0"
+description = "A provider-neutral LangGraph supervisor for coding-agent workflows."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+authors = [{ name = "Kuren Peng" }]
+dependencies = [
+  "langgraph==1.2.11",
+  "langgraph-checkpoint-sqlite>=3.1,<4",
+  "pydantic>=2.10,<3",
+  "tomlkit>=0.13,<1",
+  "typer>=0.16,<1",
+]
+
+[project.urls]
+Homepage = "https://github.com/weryk153/agent-workflow-supervisor"
+Documentation = "https://github.com/weryk153/agent-workflow-supervisor/tree/main/docs"
+Repository = "https://github.com/weryk153/agent-workflow-supervisor.git"
+Issues = "https://github.com/weryk153/agent-workflow-supervisor/issues"
+Changelog = "https://github.com/weryk153/agent-workflow-supervisor/blob/main/CHANGELOG.md"
+
+[project.scripts]
+agent-supervisor = "agent_workflow_supervisor.cli:app"
+oa = "agent_workflow_supervisor.cli:app"
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3,<10",
+  "pytest-cov>=6,<8",
+  "ruff>=0.12,<1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agent_workflow_supervisor"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
