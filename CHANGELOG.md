@@ -4,6 +4,22 @@ Notable changes are documented here. This project follows semantic versioning
 after its first stable release; pre-1.0 releases may still change configuration
 with an explicit migration note.
 
+## 0.2.0 - 2026-09-01
+
+### Added
+
+- Per-project `policy.merge_mode` with `manual` and `automatic` choices.
+- `oa project merge-mode` for inspecting or changing the policy from AO or a
+  terminal, including safe supervisor restart when needed.
+- AO managed rules that map explicit merge-policy and merge requests to the
+  head-bound supervisor approval flow.
+
+### Compatibility
+
+- Missing `policy.merge_mode` defaults to `manual`, so upgrading an existing
+  project fails safe by requiring confirmation. Set it to `automatic` to retain
+  the previous non-protected auto-merge behavior.
+
 ## 0.1.1 - 2026-09-01
 
 ### Fixed

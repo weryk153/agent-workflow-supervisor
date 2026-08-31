@@ -976,7 +976,7 @@ def build_supervisor_graph(deps: SupervisorDependencies, checkpointer: Any = Non
                 "change_id": state["change_id"],
                 "change_url": state.get("change_url", ""),
                 "change_head_sha": state.get("change_head_sha", ""),
-                "message": "Approve this protected change?",
+                "message": "Approve this exact change and head for merge?",
             }
         )
         action = response.get("action") if isinstance(response, dict) else str(response)
@@ -986,7 +986,7 @@ def build_supervisor_graph(deps: SupervisorDependencies, checkpointer: Any = Non
                 "approval_change_id": state["change_id"],
                 "approval_target_sha": state["change_head_sha"],
                 "status": "approval_recorded",
-                "events": ["human approved protected change"],
+                "events": ["human approved change for merge"],
             }
         return {
             "approval": "rejected",

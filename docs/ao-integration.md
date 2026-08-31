@@ -45,6 +45,9 @@ orchestrator executes the underlying command and summarizes the JSON result.
 | “What is the status of issue #220?” | `oa status --project my-project --work-item 220` |
 | “Approve issue #220.” | `oa approve 220 --project my-project --decision approve` |
 | “Reject issue #220.” | `oa approve 220 --project my-project --decision reject` |
+| “Does this project merge automatically?” | `oa project merge-mode my-project` |
+| “Require approval before merge.” | `oa project merge-mode my-project --set manual` |
+| “Enable automatic merge.” | `oa project merge-mode my-project --set automatic` |
 | “List configured Claude accounts.” | `oa account list` |
 | “Switch this project to the work account.” | `oa project switch-account my-project --use work` |
 | “List model profiles.” | `oa model list` |
@@ -60,11 +63,18 @@ model names must come from registered profiles rather than being guessed.
 starts the background supervisor if necessary. LangGraph selects the configured
 route, enforces capacity, asks AO to acquire a worker, reconciles review and CI,
 pauses at any configured human gate, performs a guarded merge, and cleans the
-worker. AO continues to display the actual sessions and worktrees.
+worker. In the default `manual` merge mode, every merge is such a gate. In
+`automatic` mode, only matching protected labels pause. AO continues to display
+the actual sessions and worktrees.
 
 An approval request succeeds only while the workflow is paused for the exact
 change id and head SHA shown by that gate. Sending “approve” early does not queue
 permission for a future pull request.
+
+Merge mode is project policy rather than a property of the current AO session.
+Changing it from the AO conversation updates the project's supervisor TOML and
+restarts only that supervisor when needed. It never retroactively treats an old
+approval as permission for a newer head.
 
 The AO orchestrator should not duplicate this scheduling by directly spawning
 an issue worker after dispatch. The managed rule block tells it that the
@@ -116,8 +126,8 @@ Use an external terminal for:
 - direct `oa project bind-account ... --restart` recovery.
 
 These are control-plane bootstrap or recovery operations. Dispatch, status,
-approval, account selection, and model inspection are ordinary AO conversation
-operations after integration.
+approval, merge-policy selection, account selection, and model inspection are
+ordinary AO conversation operations after integration.
 
 ## Refresh or remove the managed rules
 

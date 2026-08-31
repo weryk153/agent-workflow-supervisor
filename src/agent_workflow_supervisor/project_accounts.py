@@ -132,6 +132,7 @@ def _new_project_config(
     value["tracker"] = tracker
 
     policy = table()
+    policy.add("merge_mode", "manual")
     policy.add("default_harness", "claude-code")
     policy.add("skip_labels", ["agent:skip"])
     policy.add("approval_labels", [])
@@ -337,10 +338,16 @@ def _install_orchestrator_rules(
         "safe replacement after this turn becomes idle; report that the current conversation "
         "will be replaced. Never run bind-account --restart from inside the session. To list "
         f"model profiles, run {oa_command} model list; to inspect this project's assigned "
-        f"models, run {oa_command} project models {shlex.quote(project_id)}. Interactive "
-        "account login with oa account add and recovery when AO is unavailable still require "
-        "an external terminal. Discussion, inspection, planning, or mentioning an issue "
-        "number is not authorization to dispatch or mutate anything. The supervisor owns "
+        f"models, run {oa_command} project models {shlex.quote(project_id)}. "
+        f"To inspect whether this project merges automatically or waits for approval, run "
+        f"{oa_command} project merge-mode {shlex.quote(project_id)}. Only when the user "
+        f"explicitly asks to change that policy, run the same command with --set automatic "
+        f"or --set manual. In manual mode, an explicit request to merge issue #N maps to "
+        f"{oa_command} approve N --project {shlex.quote(project_id)} --decision approve, "
+        "and only after the workflow is waiting at that exact merge gate. "
+        "Interactive account login with oa account add and recovery when AO is unavailable "
+        "still require an external terminal. Discussion, inspection, planning, or mentioning "
+        "an issue number is not authorization to dispatch or mutate anything. The supervisor owns "
         "worker acquisition, review reconciliation, approval gates, merge, and cleanup.\n"
         f"{end_marker}"
     )

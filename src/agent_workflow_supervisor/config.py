@@ -76,6 +76,7 @@ class RouteRule(BaseModel):
 
 
 class PolicyConfig(BaseModel):
+    merge_mode: Literal["automatic", "manual"] = "manual"
     default_harness: str = "claude-code"
     default_model_profile: str | None = None
     skip_labels: set[str] = Field(default_factory=lambda: {"ao:skip"})

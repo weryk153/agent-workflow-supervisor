@@ -51,9 +51,9 @@ login under two names.
   instead of waiting silently forever.
 - Verifies that review approval matches the current pull-request head SHA.
 - Checks draft, mergeability, merge state, and status checks.
-- Interrupts for protected human approval. The queue accepts a decision only
-  while that exact change and head SHA are paused, and the graph revalidates
-  every change gate after resume.
+- Interrupts for manual-merge policy or protected-label human approval. The
+  queue accepts a decision only while that exact change and head SHA are
+  paused, and the graph revalidates every change gate after resume.
 - Merges with a head-commit guard and cleans up the worker.
 
 ### Agent Orchestrator
@@ -86,7 +86,7 @@ explicit dispatch
   → spawn through AO
   → inspect worker and review
   → verify current PR head and checks
-  → optional human interrupt
+  → optional policy/label approval interrupt
   → revalidate current PR head and checks
   → guarded squash merge
   → terminate and clean worker

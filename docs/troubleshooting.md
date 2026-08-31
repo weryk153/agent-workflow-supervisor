@@ -298,7 +298,8 @@ checkpoint database merely to hide an unexplained mismatch.
 - `review_stale`: the approved review target SHA no longer matches the PR head.
 - `waiting_change_gate`: the PR is draft, not mergeable, not clean, or has a
   non-successful check.
-- `awaiting_approval`: a protected label requires explicit approval.
+- `awaiting_approval`: manual merge mode or a protected label requires an
+  explicit decision for the exact PR head.
 
 Check GitHub directly:
 

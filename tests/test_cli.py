@@ -227,3 +227,64 @@ def test_project_model_assignment_rolls_back_when_account_reconciliation_fails(
             },
         )
     ]
+
+
+def test_project_merge_mode_can_be_read_and_changed(monkeypatch, tmp_path: Path) -> None:
+    config_path = tmp_path / "demo.toml"
+    config_path.write_text(
+        """
+[project]
+id = "demo"
+
+[tracker]
+repository = "owner/repo"
+
+[policy]
+merge_mode = "manual"
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "resolve_or_create_project_config",
+        lambda *_args, **_kwargs: config_path,
+    )
+    monkeypatch.setattr(cli_module, "service_running", lambda _config: False)
+    rendered: list[dict] = []
+    monkeypatch.setattr(cli_module, "_print", rendered.append)
+
+    cli_module.project_merge_mode("demo")
+    cli_module.project_merge_mode("demo", selected="automatic")
+
+    assert rendered[0]["merge_mode"] == "manual"
+    assert rendered[1] == {
+        "project_id": "demo",
+        "merge_mode": "automatic",
+        "config": str(config_path),
+        "restarted": False,
+    }
+    assert 'merge_mode = "automatic"' in config_path.read_text(encoding="utf-8")
+
+
+def test_project_merge_mode_rejects_unknown_value(monkeypatch, tmp_path: Path) -> None:
+    config_path = tmp_path / "demo.toml"
+    config_path.write_text(
+        """
+[project]
+id = "demo"
+
+[tracker]
+repository = "owner/repo"
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "resolve_or_create_project_config",
+        lambda *_args, **_kwargs: config_path,
+    )
+
+    with pytest.raises(typer.BadParameter, match="automatic or manual"):
+        cli_module.project_merge_mode("demo", selected="always")

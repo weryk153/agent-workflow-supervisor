@@ -38,6 +38,7 @@ def test_generated_project_config_starts_in_shadow_mode() -> None:
 
     assert document["supervisor"]["shadow_mode"] is True
     assert document["project"]["id"] == "demo"
+    assert document["policy"]["merge_mode"] == "manual"
     assert document["policy"]["capacity"]["claude-code"] == 1
     assert "codex" not in document["policy"]["capacity"]
     assert "models" not in document["policy"]
@@ -588,6 +589,8 @@ def test_managed_ao_rules_are_ao_first_and_preserve_operator_rules() -> None:
     assert rules.startswith("Operator-owned rule.")
     assert "Treat this AO conversation as the primary user interface" in rules
     assert "project switch-account demo --use ACCOUNT" in rules
+    assert "project merge-mode demo" in rules
+    assert "--set automatic" in rules
     assert "Never run bind-account --restart from inside the session" in rules
     assert rules.count("[LANGGRAPH_SUPERVISOR]") == 1
     assert rules.count("[/LANGGRAPH_SUPERVISOR]") == 1

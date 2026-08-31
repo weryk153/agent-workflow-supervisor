@@ -111,6 +111,7 @@ Existing installations may continue using harness routing:
 
 ```toml
 [policy]
+merge_mode = "manual"
 default_harness = "claude-code"
 skip_labels = ["agent:skip"]
 approval_labels = ["approval:required"]
@@ -127,6 +128,19 @@ claude-code = "provider-model-id"
 harness = "codex"
 labels_any = ["agent:codex"]
 ```
+
+`policy.merge_mode` controls the final merge decision:
+
+- `manual` (the default) pauses every approved, merge-ready change for an exact
+  user decision. In AO, “merge issue #N” maps to the existing head-bound
+  approval command.
+- `automatic` merges an approved current head after draft, mergeability,
+  merge-state, and CI checks pass.
+
+`approval_labels` are an additional safety rule. A matching label always
+requires manual approval even when `merge_mode = "automatic"`. Changing the
+merge mode affects future reconciliation; it does not approve an already
+paused change or bypass any change gate.
 
 No cross-harness role assignment is enabled in the generated configuration.
 The route above only illustrates explicit label routing. Operators choose all

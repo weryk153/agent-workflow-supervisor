@@ -92,7 +92,7 @@ def has_model_capacity(
 
 
 def requires_approval(item: WorkItem, policy: PolicyConfig) -> bool:
-    return bool(item.labels & policy.approval_labels)
+    return policy.merge_mode == "manual" or bool(item.labels & policy.approval_labels)
 
 
 def select_credential_profile(

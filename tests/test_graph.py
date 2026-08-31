@@ -111,12 +111,18 @@ class FakeTracker:
         self.merged.append((change_id, expected_head_sha))
 
 
-def config(*, shadow: bool, approval_labels: set[str] | None = None) -> AppConfig:
+def config(
+    *,
+    shadow: bool,
+    approval_labels: set[str] | None = None,
+    merge_mode: str = "automatic",
+) -> AppConfig:
     return AppConfig(
         supervisor=SupervisorConfig(shadow_mode=shadow),
         project=ProjectConfig(id="demo"),
         tracker=TrackerConfig(repository="owner/repo"),
         policy=PolicyConfig(
+            merge_mode=merge_mode,
             default_harness="claude-code",
             capacity={"claude-code": 2, "codex": 1},
             approval_labels=approval_labels or set(),
@@ -523,6 +529,41 @@ def test_protected_change_interrupts_before_merge_and_can_resume() -> None:
     resumed = graph.invoke(Command(resume={"action": "approve"}), config=invocation)
     assert resumed["status"] == "completed"
     assert tracker.merged == [("8", "def")]
+
+
+def test_manual_merge_mode_interrupts_for_non_protected_change() -> None:
+    item = WorkItem("1", "code")
+    review = ReviewResult(
+        status="complete",
+        verdict="approved",
+        change_id="7",
+        target_sha="abc",
+    )
+    change = ChangeRequest(
+        "7", "https://example/pr/7", "OPEN", "abc", mergeable=True, merge_state="CLEAN"
+    )
+    runner = FakeRunner(item, review)
+    tracker = FakeTracker(item, change)
+    graph = build_supervisor_graph(
+        SupervisorDependencies(
+            config(shadow=False, merge_mode="manual"),
+            runner,
+            tracker,
+        ),
+        InMemorySaver(),
+    )
+    invocation = run_config("manual-merge")
+
+    paused = graph.invoke(
+        {"project_id": "demo", "work_item_id": "1", "events": []},
+        config=invocation,
+    )
+    assert paused["__interrupt__"]
+    assert tracker.merged == []
+
+    resumed = graph.invoke(Command(resume={"action": "approve"}), config=invocation)
+    assert resumed["status"] == "completed"
+    assert tracker.merged == [("7", "abc")]
 
 
 def test_protected_change_revalidates_ci_after_human_approval() -> None:

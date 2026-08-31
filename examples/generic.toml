@@ -19,6 +19,7 @@ command = "gh"
 repository = "owner/repository"
 
 [policy]
+merge_mode = "manual"
 default_harness = "claude-code"
 skip_labels = ["agent:skip"]
 approval_labels = ["approval:required"]

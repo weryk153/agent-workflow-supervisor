@@ -32,9 +32,30 @@ repository = "owner/repo"
     assert config.supervisor.database_path == tmp_path / ".state/test.sqlite"
     assert config.runner.type == "ao"
     assert config.policy.default_harness == "claude-code"
+    assert config.policy.merge_mode == "manual"
     assert config.policy.report_only_harnesses == set()
     assert config.supervisor.review_timeout_seconds == 1800
     assert config.supervisor.review_max_attempts == 2
+
+
+def test_config_rejects_unknown_merge_mode(tmp_path: Path) -> None:
+    config_path = tmp_path / "supervisor.toml"
+    config_path.write_text(
+        """
+[project]
+id = "demo"
+
+[tracker]
+repository = "owner/repo"
+
+[policy]
+merge_mode = "sometimes"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValidationError, match="merge_mode"):
+        load_config(config_path)
 
 
 def test_load_config_accepts_isolated_credential_profiles(tmp_path: Path) -> None:

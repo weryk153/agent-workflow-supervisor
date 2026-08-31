@@ -35,10 +35,10 @@ ao agent ls --json
 
 ## Install
 
-Install version 0.1.1 directly from GitHub:
+Install version 0.2.0 directly from GitHub:
 
 ```bash
-uv tool install git+https://github.com/weryk153/agent-workflow-supervisor.git@v0.1.1
+uv tool install git+https://github.com/weryk153/agent-workflow-supervisor.git@v0.2.0
 oa --help
 ```
 
@@ -86,6 +86,7 @@ Copy `examples/generic.toml` outside the source checkout and replace at least:
 - `project.id`
 - `tracker.repository`
 - runner command if `ao` is not on `PATH`
+- `policy.merge_mode` (`manual` or `automatic`)
 - labels, harness limits, and model names for the target project
 
 Install it in shadow mode first:
@@ -149,10 +150,18 @@ oa dispatch 123 --project my-project
 oa status --project my-project --work-item 123
 ```
 
-Protected changes pause for approval:
+The example defaults to manual merge, so every approved change pauses for an
+exact decision. Protected labels also pause when automatic mode is selected:
 
 ```bash
 oa approve 123 --project my-project --decision approve
+```
+
+The same choice is available from the AO conversation or CLI:
+
+```bash
+oa project merge-mode my-project
+oa project merge-mode my-project --set automatic
 ```
 
 Stopping the supervisor does not stop AO or existing AO workers:

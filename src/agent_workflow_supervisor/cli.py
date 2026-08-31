@@ -79,6 +79,19 @@ def _print(value: Any) -> None:
     typer.echo(json.dumps(_jsonable(value), ensure_ascii=False, indent=2))
 
 
+def _atomic_write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        "w",
+        encoding="utf-8",
+        dir=path.parent,
+        delete=False,
+    ) as temporary:
+        temporary.write(text)
+        temporary_path = Path(temporary.name)
+    os.replace(temporary_path, path)
+
+
 def _load_runtime_config(path: Path) -> AppConfig:
     return load_config(path, registry_path=REGISTRY_PATH)
 
@@ -134,15 +147,7 @@ def setup(
         document.setdefault("supervisor", {})["shadow_mode"] = False
     DEFAULT_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     rendered = toml_dumps(document)
-    with tempfile.NamedTemporaryFile(
-        "w",
-        encoding="utf-8",
-        dir=DEFAULT_CONFIG_PATH.parent,
-        delete=False,
-    ) as temporary:
-        temporary.write(rendered)
-        temporary_path = Path(temporary.name)
-    os.replace(temporary_path, DEFAULT_CONFIG_PATH)
+    _atomic_write_text(DEFAULT_CONFIG_PATH, rendered)
     config = load_config(DEFAULT_CONFIG_PATH)
     register_account("default", config_dir=None)
     register_project(config.project.id, config_path=DEFAULT_CONFIG_PATH)
@@ -155,6 +160,7 @@ def setup(
             "installed": str(DEFAULT_CONFIG_PATH),
             "project_id": config.project.id,
             "shadow_mode": config.supervisor.shadow_mode,
+            "merge_mode": config.policy.merge_mode,
             "ao_rules": ao_rules,
         }
     )
@@ -173,6 +179,7 @@ def start(config_path: ConfigPath = None, project_id: ProjectId = None) -> None:
             "pid": pid,
             "project_id": config.project.id,
             "shadow_mode": config.supervisor.shadow_mode,
+            "merge_mode": config.policy.merge_mode,
             "log": str(log_path),
         }
     )
@@ -477,6 +484,7 @@ def project_register(
             "config": str(config_path),
             "repository": config.tracker.repository,
             "shadow_mode": config.supervisor.shadow_mode,
+            "merge_mode": config.policy.merge_mode,
             "ao_rules": ao_rules,
         }
     )
@@ -495,9 +503,68 @@ def project_list() -> None:
                     "accounts": list(project.accounts),
                     "models": list(project.model_profiles),
                     "default_model": project.default_model_profile,
+                    "merge_mode": (
+                        _load_runtime_config(project.config_path).policy.merge_mode
+                        if project.config_path.is_file()
+                        else None
+                    ),
                 }
                 for project in list_projects()
             ]
+        }
+    )
+
+
+@project_app.command("merge-mode")
+def project_merge_mode(
+    project_id: Annotated[str, typer.Argument(help="AO project id")],
+    selected: Annotated[
+        str | None,
+        typer.Option("--set", help="automatic or manual"),
+    ] = None,
+) -> None:
+    """Show or change whether approved changes merge without user confirmation."""
+
+    config_path = resolve_or_create_project_config(
+        project_id,
+        default_config_path=DEFAULT_CONFIG_PATH,
+        registry_path=REGISTRY_PATH,
+    )
+    config = _load_runtime_config(config_path)
+    if selected is None:
+        _print(
+            {
+                "project_id": project_id,
+                "merge_mode": config.policy.merge_mode,
+                "config": str(config_path),
+            }
+        )
+        return
+    if selected not in {"automatic", "manual"}:
+        raise typer.BadParameter("--set must be automatic or manual")
+
+    was_running = service_running(config)
+    if was_running:
+        stop_service(config)
+    original = config_path.read_text(encoding="utf-8")
+    try:
+        document = toml_parse(original)
+        document.setdefault("policy", {})["merge_mode"] = selected
+        _atomic_write_text(config_path, toml_dumps(document))
+        updated = _load_runtime_config(config_path)
+    except Exception:
+        _atomic_write_text(config_path, original)
+        raise
+    finally:
+        if was_running:
+            start_service(config_path)
+
+    _print(
+        {
+            "project_id": project_id,
+            "merge_mode": updated.policy.merge_mode,
+            "config": str(config_path),
+            "restarted": was_running,
         }
     )
 
@@ -690,6 +757,7 @@ def status(
                 "service": service,
                 "project_id": config.project.id,
                 "shadow_mode": config.supervisor.shadow_mode,
+                "merge_mode": config.policy.merge_mode,
                 "jobs": [job_as_dict(job) for job in store.list()],
             }
         )
@@ -703,6 +771,9 @@ def status(
     _print(
         {
             "service": service,
+            "project_id": config.project.id,
+            "shadow_mode": config.supervisor.shadow_mode,
+            "merge_mode": config.policy.merge_mode,
             "job": job_as_dict(job) if (job := store.get(work_item_id)) else None,
             "thread_id": thread_id,
             "state": snapshot.values,

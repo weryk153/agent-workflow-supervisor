@@ -28,8 +28,8 @@ scripts, diagnostics, and recovery.
 | `oa dispatch N [--project ID]` | Idempotently queues one issue and starts the service. |
 | `oa tick --work-item N [--project ID]` | Runs one reconciliation pass. |
 | `oa tick --work-item N --apply` | Allows mutations for that one tick. |
-| `oa approve N --decision approve` | Approves the exact change/head currently paused. |
-| `oa approve N --decision reject` | Rejects the exact protected change/head currently paused. |
+| `oa approve N --decision approve` | Approves the exact change/head currently paused for merge. |
+| `oa approve N --decision reject` | Rejects the exact change/head currently paused for merge. |
 
 Dispatch does not scan for other issues. Re-dispatching an active work item does
 not create a duplicate queue row.
@@ -122,9 +122,16 @@ do not download weights, start a model server, or edit provider config.
 |---|---|
 | `oa project register ID` | Registers an existing AO project and creates supervisor config if needed. |
 | `oa project list` | Lists supervisor projects, config paths, accounts, and models. |
+| `oa project merge-mode ID` | Shows whether the project uses manual or automatic merge. |
+| `oa project merge-mode ID --set manual` | Requires an explicit user decision for every merge. |
+| `oa project merge-mode ID --set automatic` | Merges after review and all change gates pass. |
 
 Automatic project config creation requires the AO project to have a GitHub
 remote from which `owner/repository` can be derived.
+
+Changing merge mode safely restarts that project's supervisor only when it was
+already running. `automatic` does not bypass review, current-head matching,
+draft, mergeability, merge-state, CI, or label-based approval gates.
 
 `setup`, `project register`, and `project accounts --set` install or refresh the
 managed `[LANGGRAPH_SUPERVISOR]` block in AO's orchestrator rules. Text outside

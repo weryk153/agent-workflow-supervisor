@@ -52,6 +52,14 @@ def test_protected_label_requires_approval() -> None:
     assert requires_approval(WorkItem("1", "art", labels=frozenset({"art"})), policy())
 
 
+def test_manual_merge_mode_requires_approval_for_every_change() -> None:
+    manual = policy().model_copy(update={"merge_mode": "manual"})
+    automatic = policy().model_copy(update={"merge_mode": "automatic"})
+
+    assert requires_approval(WorkItem("1", "code"), manual)
+    assert not requires_approval(WorkItem("1", "code"), automatic)
+
+
 def test_exited_session_is_not_active() -> None:
     assert not AgentSession("1", "worker", "exited", "claude-code").active
 

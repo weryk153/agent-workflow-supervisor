@@ -17,10 +17,10 @@ session manager, worktree owner, and agent runner. This package uses
 [LangGraph](https://github.com/langchain-ai/langgraph) to coordinate policy and
 delivery state around those AO sessions.
 
-Install version 0.1.1 from GitHub:
+Install version 0.2.0 from GitHub:
 
 ```bash
-uv tool install git+https://github.com/weryk153/agent-workflow-supervisor.git@v0.1.1
+uv tool install git+https://github.com/weryk153/agent-workflow-supervisor.git@v0.2.0
 ```
 
 Then follow the [installation guide](docs/installation.md) for one-time project
@@ -42,7 +42,8 @@ inside AO rather than in a separate terminal.
 - **Review and CI awareness** — delivery advances only when the current change
   has the required review and checks; a bounded watchdog recovers failed or
   timed-out AO reviewers instead of waiting silently forever.
-- **Human control** — protected work pauses for an explicit approval decision.
+- **User-selected merge control** — each project chooses automatic merge or a
+  manual, head-bound approval gate; protected labels always pause.
 - **Guarded merge** — stale approval cannot merge a newer, unreviewed commit.
 
 ## How it fits with AO
@@ -60,6 +61,8 @@ Once a project is integrated, open its orchestrator in AO and ask naturally:
 - **Start work** — “Handle issue #123.”
 - **Check progress** — “What is the status of issue #123?”
 - **Make a decision** — “Approve issue #123.” or “Reject issue #123.”
+- **Choose merge behavior** — “Require approval before merge.” or “Enable
+  automatic merge.”
 - **Inspect accounts** — “List the configured Claude accounts.”
 - **Change account** — “Switch this project to the work account.”
 - **Inspect models** — “Which models are assigned to this project?”
@@ -82,8 +85,10 @@ terminal.
 2. It checks capacity and reuses or acquires an eligible AO worker.
 3. The worker implements the change in its AO-managed workspace.
 4. The supervisor reconciles the pull request, current-head review, and CI.
-5. Protected work pauses for human approval, then rechecks every change gate.
-6. An approved current head is merged with a commit-match guard.
+5. Manual-merge projects and protected work pause for human approval, then
+   recheck every change gate.
+6. An approved current head is merged with a commit-match guard; automatic
+   projects skip only the human confirmation, not review or CI.
 7. The completed worker is cleaned up while workflow history remains durable.
 
 The supervisor never scans GitHub and starts work by itself. Every work item
@@ -120,6 +125,8 @@ workflow graph.
   for approval again, but cannot replay it against a later gate.
 - Draft, mergeability, merge-state, and CI gates are revalidated after a human
   approval resumes the workflow.
+- New and unspecified project policies default to manual merge. Automatic merge
+  must be selected explicitly per project.
 - Merge requires GitHub to still report that same head commit.
 - Account records reference profiles and config directories, not OAuth tokens
   or API keys.
