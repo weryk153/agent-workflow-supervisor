@@ -465,6 +465,44 @@ def test_missing_review_record_is_retriggered_after_timeout() -> None:
     assert runner.cancelled_reviews == []
 
 
+def test_pr_open_worker_without_review_record_triggers_initial_review() -> None:
+    item = WorkItem("1", "code")
+    runner = FakeRunner(item)
+    runner.sessions = [
+        AgentSession(
+            "pr-worker",
+            "worker",
+            "pr_open",
+            "claude-code",
+            work_item_id="1",
+            project_id="demo",
+        )
+    ]
+    tracker = FakeTracker(item)
+    graph = build_supervisor_graph(
+        SupervisorDependencies(config(shadow=False), runner, tracker),
+        InMemorySaver(),
+    )
+
+    result = graph.invoke(
+        {"project_id": "demo", "work_item_id": "1", "events": []},
+        config=run_config("initial-review-missing"),
+    )
+
+    assert result["status"] == "review_pending"
+    assert result["review_worker_id"] == "pr-worker"
+    assert result["review_triggered_for_sha"] == "pr-worker:unknown"
+    assert result["review_attempts"] == 1
+
+    repeated = graph.invoke(
+        {"project_id": "demo", "work_item_id": "1", "events": []},
+        config=run_config("initial-review-missing"),
+    )
+
+    assert repeated["status"] == "review_pending"
+    assert runner.triggered == ["pr-worker"]
+
+
 def test_approved_change_merges_and_cleans_worker() -> None:
     item = WorkItem("1", "code")
     review = ReviewResult(

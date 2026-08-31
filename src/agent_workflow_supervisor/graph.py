@@ -742,6 +742,27 @@ def build_supervisor_graph(deps: SupervisorDependencies, checkpointer: Any = Non
             started_at = state.get("review_started_at", "")
             attempts = state.get("review_attempts", 0)
             review_key = state.get("review_triggered_for_sha", "")
+            # A newly opened PR can briefly exist before AO creates its first
+            # review record. The worker status is the only durable signal in
+            # that window; without adopting it, the workflow waits forever in
+            # worker_running and never asks AO to start a review.
+            if worker.status.casefold() == "pr_open" and not (
+                same_worker and review_key and attempts
+            ):
+                missing_review_key = f"{worker.id}:unknown"
+                if not config.supervisor.shadow_mode:
+                    runner.trigger_review(worker.id)
+                action = "shadow: would trigger" if config.supervisor.shadow_mode else "triggered"
+                return {
+                    **base,
+                    "review_worker_id": worker.id,
+                    "review_run_id": "",
+                    "review_triggered_for_sha": missing_review_key,
+                    "review_started_at": iso_now(),
+                    "review_attempts": 1,
+                    "status": "review_pending",
+                    "events": [f"{action} initial review for PR-open worker {worker.id}"],
+                }
             if same_worker and review_key and attempts and review_timed_out(started_at):
                 if config.supervisor.shadow_mode:
                     return {

@@ -4,6 +4,14 @@ Notable changes are documented here. This project follows semantic versioning
 after its first stable release; pre-1.0 releases may still change configuration
 with an explicit migration note.
 
+## 0.2.1 - 2026-09-01
+
+### Fixed
+
+- Trigger the initial AO review when a worker reports `pr_open` before AO has
+  created any review record. Previously that race left the workflow in
+  `worker_running` forever despite an open pull request.
+
 ## 0.2.0 - 2026-09-01
 
 ### Added

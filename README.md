@@ -17,10 +17,10 @@ session manager, worktree owner, and agent runner. This package uses
 [LangGraph](https://github.com/langchain-ai/langgraph) to coordinate policy and
 delivery state around those AO sessions.
 
-Install version 0.2.0 from GitHub:
+Install version 0.2.1 from GitHub:
 
 ```bash
-uv tool install git+https://github.com/weryk153/agent-workflow-supervisor.git@v0.2.0
+uv tool install git+https://github.com/weryk153/agent-workflow-supervisor.git@v0.2.1
 ```
 
 Then follow the [installation guide](docs/installation.md) for one-time project
