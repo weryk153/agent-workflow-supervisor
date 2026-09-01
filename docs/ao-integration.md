@@ -67,6 +67,20 @@ worker. In the default `manual` merge mode, every merge is such a gate. In
 `automatic` mode, only matching protected labels pause. AO continues to display
 the actual sessions and worktrees.
 
+When dispatch runs inside an AO conversation, it records that orchestrator's
+`AO_SESSION_ID`. The background service sends that conversation a read-only
+update when the workflow reaches an approval gate, completes, or encounters an
+actionable blocker. The orchestrator refreshes `oa status` and summarizes the
+result; a supervisor update never counts as user authorization for approval,
+rejection, merge, or redispatch. Successful deliveries are checkpointed in the
+job database so the normal reconciliation loop does not repeat them. If an
+account switch replaced the original session, notification falls back only
+when exactly one active orchestrator exists in the base AO project.
+
+Dispatch from an external terminal has no originating AO conversation and
+therefore remains headless; inspect it with `oa status` or an intentional
+automation.
+
 An approval request succeeds only while the workflow is paused for the exact
 change id and head SHA shown by that gate. Sending “approve” early does not queue
 permission for a future pull request.

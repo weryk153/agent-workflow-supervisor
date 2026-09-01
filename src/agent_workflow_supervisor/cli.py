@@ -13,6 +13,7 @@ from tomlkit import dumps as toml_dumps
 from tomlkit import parse as toml_parse
 
 from agent_workflow_supervisor.accounts import add_claude_account, list_claude_accounts
+from agent_workflow_supervisor.adapters.ao import AoRunner
 from agent_workflow_supervisor.config import AppConfig, load_config
 from agent_workflow_supervisor.identifiers import canonical_github_issue_id
 from agent_workflow_supervisor.model_health import diagnose_model_profile
@@ -132,6 +133,29 @@ def _canonical_work_item_id(config: AppConfig, work_item_id: str) -> str:
         raise typer.BadParameter(str(error)) from error
 
 
+def _dispatch_origin_session(config: AppConfig) -> str | None:
+    if config.runner.type != "ao":
+        return None
+    session_id = os.environ.get("AO_SESSION_ID")
+    if not session_id:
+        return None
+    session = AoRunner(
+        config.runner.command,
+        repository=config.tracker.repository,
+    ).get_session(session_id)
+    if session is None:
+        raise typer.BadParameter(f"AO origin session {session_id!r} was not found")
+    if (
+        not session.active
+        or session.role != "orchestrator"
+        or session.project_id not in {None, config.project.id}
+    ):
+        raise typer.BadParameter(
+            "dispatch notifications require the active orchestrator for this AO project"
+        )
+    return session.id
+
+
 @app.command()
 def setup(
     source: Annotated[Path, typer.Option("--source", exists=True, dir_okay=False)],
@@ -215,8 +239,12 @@ def dispatch(
     resolved = _resolve_config_path(config_path, project_id)
     config = _load_runtime_config(resolved)
     work_item_id = _canonical_work_item_id(config, work_item_id)
+    origin_session_id = _dispatch_origin_session(config)
     pid = start_service(resolved)
-    job = JobStore(config.supervisor.runtime_dir).dispatch(work_item_id)
+    job = JobStore(config.supervisor.runtime_dir).dispatch(
+        work_item_id,
+        origin_session_id=origin_session_id,
+    )
     _print({"dispatched": work_item_id, "service_pid": pid, "job": job_as_dict(job)})
 
 

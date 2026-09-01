@@ -105,6 +105,7 @@ explicit dispatch
   → revalidate current PR head and checks
   → guarded squash merge
   → terminate and clean worker
+  → report the durable outcome to the dispatching AO orchestrator
 ```
 
 The background service repeatedly reconciles durable state. It does not infer
@@ -112,7 +113,8 @@ new work from repository labels and does not scan the issue tracker.
 
 ## Persistence
 
-- `jobs.sqlite` stores the explicit dispatch queue.
+- `jobs.sqlite` stores the explicit dispatch queue, its originating AO session
+  when present, and durable notification/deduplication state.
 - The configured LangGraph SQLite database stores workflow checkpoints.
 - AO stores its execution sessions and worktrees independently. Process mode
   stores equivalent metadata in `process-runner/state.sqlite` and owns its git

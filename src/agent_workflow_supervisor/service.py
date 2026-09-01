@@ -22,6 +22,7 @@ from typing import Any
 
 from langgraph.types import Command
 
+from agent_workflow_supervisor.adapters.ao import AoRunner
 from agent_workflow_supervisor.adapters.command import AdapterCommandError, CommandAdapter
 from agent_workflow_supervisor.config import AppConfig, load_config
 from agent_workflow_supervisor.identifiers import canonical_github_issue_id
@@ -34,6 +35,16 @@ TERMINAL_STATUSES = {
     "planned_merge",
     "planned_worker",
     "skipped",
+}
+
+NOTIFIABLE_STATUSES = TERMINAL_STATUSES | {
+    "awaiting_approval",
+    "review_stalled",
+    "worker_acquisition_pending",
+    "worker_reservation_conflict",
+    "worker_reservation_unverified",
+    "worker_route_conflict",
+    "worker_unhealthy",
 }
 
 _spawned_children: dict[int, subprocess.Popen[bytes]] = {}
@@ -53,6 +64,10 @@ class QueuedWork:
     approval_change_id: str | None
     approval_target_sha: str | None
     last_error: str | None
+    origin_session_id: str | None
+    notification_key: str | None
+    notified_key: str | None
+    notification_error: str | None
     created_at: str
     updated_at: str
 
@@ -108,6 +123,10 @@ class JobStore:
                     approval_change_id TEXT,
                     approval_target_sha TEXT,
                     last_error TEXT,
+                    origin_session_id TEXT,
+                    notification_key TEXT,
+                    notified_key TEXT,
+                    notification_error TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 )
@@ -123,6 +142,16 @@ class JobStore:
                 connection.execute(
                     "ALTER TABLE supervisor_jobs ADD COLUMN approval_target_sha TEXT"
                 )
+            for column in (
+                "origin_session_id",
+                "notification_key",
+                "notified_key",
+                "notification_error",
+            ):
+                if column not in columns:
+                    connection.execute(
+                        f"ALTER TABLE supervisor_jobs ADD COLUMN {column} TEXT"
+                    )
             # Older releases could queue a decision before these binding
             # columns existed. Such a decision cannot be proven to authorize
             # any current gate, so migration must invalidate it.
@@ -149,19 +178,32 @@ class JobStore:
                 str(row["approval_target_sha"]) if row["approval_target_sha"] else None
             ),
             last_error=str(row["last_error"]) if row["last_error"] else None,
+            origin_session_id=(
+                str(row["origin_session_id"]) if row["origin_session_id"] else None
+            ),
+            notification_key=(
+                str(row["notification_key"]) if row["notification_key"] else None
+            ),
+            notified_key=str(row["notified_key"]) if row["notified_key"] else None,
+            notification_error=(
+                str(row["notification_error"]) if row["notification_error"] else None
+            ),
             created_at=str(row["created_at"]),
             updated_at=str(row["updated_at"]),
         )
 
-    def dispatch(self, work_item_id: str) -> QueuedWork:
+    def dispatch(
+        self, work_item_id: str, *, origin_session_id: str | None = None
+    ) -> QueuedWork:
         now = utc_now()
         with self._transaction() as connection:
             connection.execute(
                 """
                 INSERT INTO supervisor_jobs (
                     work_item_id, active, status, approval, last_error,
-                    created_at, updated_at
-                ) VALUES (?, 1, 'queued', NULL, NULL, ?, ?)
+                    origin_session_id, notification_key, notified_key,
+                    notification_error, created_at, updated_at
+                ) VALUES (?, 1, 'queued', NULL, NULL, ?, NULL, NULL, NULL, ?, ?)
                 ON CONFLICT(work_item_id) DO UPDATE SET
                     active = 1,
                     status = CASE
@@ -184,10 +226,29 @@ class JobStore:
                         THEN NULL
                         ELSE supervisor_jobs.approval_target_sha
                     END,
+                    origin_session_id = COALESCE(
+                        excluded.origin_session_id,
+                        supervisor_jobs.origin_session_id
+                    ),
+                    notification_key = CASE
+                        WHEN supervisor_jobs.status IN ('completed', 'skipped')
+                        THEN NULL
+                        ELSE supervisor_jobs.notification_key
+                    END,
+                    notified_key = CASE
+                        WHEN supervisor_jobs.status IN ('completed', 'skipped')
+                        THEN NULL
+                        ELSE supervisor_jobs.notified_key
+                    END,
+                    notification_error = CASE
+                        WHEN supervisor_jobs.status IN ('completed', 'skipped')
+                        THEN NULL
+                        ELSE supervisor_jobs.notification_error
+                    END,
                     last_error = NULL,
                     updated_at = excluded.updated_at
                 """,
-                (work_item_id, now, now),
+                (work_item_id, origin_session_id, now, now),
             )
         job = self.get(work_item_id)
         assert job is not None
@@ -314,6 +375,44 @@ class JobStore:
             rows = connection.execute(query).fetchall()
         return [self._row(row) for row in rows]
 
+    def pending_notifications(self) -> list[QueuedWork]:
+        with self._transaction() as connection:
+            rows = connection.execute(
+                """
+                SELECT *
+                FROM supervisor_jobs
+                WHERE origin_session_id IS NOT NULL
+                  AND notification_key IS NOT NULL
+                  AND (notified_key IS NULL OR notified_key != notification_key)
+                ORDER BY updated_at
+                """
+            ).fetchall()
+        return [self._row(row) for row in rows]
+
+    def mark_notified(self, work_item_id: str, notification_key: str) -> None:
+        with self._transaction() as connection:
+            connection.execute(
+                """
+                UPDATE supervisor_jobs
+                SET notified_key = ?, notification_error = NULL
+                WHERE work_item_id = ? AND notification_key = ?
+                """,
+                (notification_key, work_item_id, notification_key),
+            )
+
+    def record_notification_error(
+        self, work_item_id: str, notification_key: str, error: str
+    ) -> None:
+        with self._transaction() as connection:
+            connection.execute(
+                """
+                UPDATE supervisor_jobs
+                SET notification_error = ?
+                WHERE work_item_id = ? AND notification_key = ?
+                """,
+                (error, work_item_id, notification_key),
+            )
+
     def update_result(
         self,
         work_item_id: str,
@@ -327,13 +426,19 @@ class JobStore:
         if status == "awaiting_approval" and approval_gate is None:
             raise ValueError("awaiting_approval requires a bound change id and target SHA")
         gate_change_id, gate_target_sha = approval_gate or (None, None)
+        notification_key = _notification_key(status, approval_gate)
         approval_clause = ", approval = NULL" if clear_approval else ""
         with self._transaction() as connection:
             connection.execute(
                 f"""
                 UPDATE supervisor_jobs
                 SET status = ?, active = ?, last_error = ?, updated_at = ?,
-                    approval_change_id = ?, approval_target_sha = ?
+                    approval_change_id = ?, approval_target_sha = ?,
+                    notification_key = COALESCE(?, notification_key),
+                    notification_error = CASE
+                        WHEN ? IS NOT NULL AND notification_key IS NOT ? THEN NULL
+                        ELSE notification_error
+                    END
                     {approval_clause}
                 WHERE work_item_id = ?
                 """,
@@ -344,9 +449,103 @@ class JobStore:
                     utc_now(),
                     gate_change_id,
                     gate_target_sha,
+                    notification_key,
+                    notification_key,
+                    notification_key,
                     work_item_id,
                 ),
             )
+
+
+def _notification_key(
+    status: str, approval_gate: tuple[str, str] | None = None
+) -> str | None:
+    if status not in NOTIFIABLE_STATUSES:
+        return None
+    if status == "awaiting_approval":
+        change_id, target_sha = approval_gate or ("", "")
+        return f"{status}:{change_id}:{target_sha}"
+    return status
+
+
+def _notification_message(config: AppConfig, job: QueuedWork) -> str:
+    status_command = (
+        f"oa status --project {config.project.id} --work-item {job.work_item_id}"
+    )
+    if job.status == "awaiting_approval":
+        return (
+            f"Durable supervisor update for work item #{job.work_item_id}: the workflow is "
+            f"waiting for approval of change #{job.approval_change_id} at head "
+            f"{job.approval_target_sha}. Inform the user and ask them to explicitly approve "
+            f"or reject this exact gate. Run `{status_command}` first if you need the current "
+            "details. Do not approve, reject, or redispatch on the user's behalf."
+        )
+    if job.status == "completed":
+        return (
+            f"Durable supervisor update for work item #{job.work_item_id}: the workflow "
+            f"completed successfully. Run `{status_command}` and summarize the final delivery "
+            "for the user, including the pull request and merge result. Do not redispatch it."
+        )
+    if job.status in {"approval_rejected", "skipped"}:
+        return (
+            f"Durable supervisor update for work item #{job.work_item_id}: the workflow ended "
+            f"with status `{job.status}`. Run `{status_command}` and summarize the outcome for "
+            "the user. Do not redispatch it unless the user explicitly asks."
+        )
+    detail = f" Error: {job.last_error}" if job.last_error else ""
+    return (
+        f"Durable supervisor update for work item #{job.work_item_id}: the workflow needs "
+        f"attention at status `{job.status}`.{detail} Run `{status_command}` and explain the "
+        "blocker and safest next action to the user. Do not mutate or redispatch anything "
+        "without explicit authorization."
+    )
+
+
+def _notification_target(
+    runner: AoRunner, project_id: str, preferred_session_id: str
+) -> str:
+    preferred = runner.get_session(preferred_session_id)
+    if (
+        preferred is not None
+        and preferred.active
+        and preferred.role == "orchestrator"
+        and preferred.project_id in {None, project_id}
+    ):
+        return preferred.id
+
+    active_orchestrators = [
+        session
+        for session in runner.list_sessions(project_id)
+        if session.active and session.role == "orchestrator"
+    ]
+    if len(active_orchestrators) == 1:
+        return active_orchestrators[0].id
+    if not active_orchestrators:
+        raise RuntimeError(f"no active orchestrator is available for AO project {project_id}")
+    identifiers = ", ".join(session.id for session in active_orchestrators)
+    raise RuntimeError(
+        f"cannot choose a replacement orchestrator for AO project {project_id}: {identifiers}"
+    )
+
+
+def deliver_pending_notifications(config: AppConfig, store: JobStore) -> None:
+    if config.runner.type != "ao":
+        return
+    runner = AoRunner(config.runner.command, repository=config.tracker.repository)
+    for job in store.pending_notifications():
+        assert job.origin_session_id is not None
+        assert job.notification_key is not None
+        try:
+            target = _notification_target(runner, config.project.id, job.origin_session_id)
+            runner.send(target, _notification_message(config, job))
+        except Exception as error:
+            store.record_notification_error(
+                job.work_item_id,
+                job.notification_key,
+                f"{type(error).__name__}: {error}",
+            )
+        else:
+            store.mark_notified(job.work_item_id, job.notification_key)
 
 
 def runtime_paths(config: AppConfig) -> tuple[Path, Path]:
@@ -737,6 +936,7 @@ def serve(config_path: Path, instance_token: str) -> None:
                             if stopping:
                                 break
                             reconcile_job(config, store, job)
+                deliver_pending_notifications(config, store)
                 deadline = time.monotonic() + config.supervisor.poll_interval_seconds
                 while not stopping and time.monotonic() < deadline:
                     time.sleep(min(0.25, deadline - time.monotonic()))

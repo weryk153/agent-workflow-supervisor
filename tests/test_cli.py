@@ -11,6 +11,7 @@ from agent_workflow_supervisor.config import (
     SupervisorConfig,
     TrackerConfig,
 )
+from agent_workflow_supervisor.models import AgentSession
 from agent_workflow_supervisor.registry import ModelProfileRecord, ProjectRecord
 
 
@@ -60,14 +61,14 @@ def test_dispatch_canonicalizes_qualified_github_issue(monkeypatch, tmp_path: Pa
         project=ProjectConfig(id="demo"),
         tracker=TrackerConfig(repository="owner/repo"),
     )
-    dispatched: list[str] = []
+    dispatched: list[tuple[str, str | None]] = []
 
     class Store:
         def __init__(self, _runtime_dir: Path) -> None:
             pass
 
-        def dispatch(self, work_item_id: str):
-            dispatched.append(work_item_id)
+        def dispatch(self, work_item_id: str, *, origin_session_id: str | None = None):
+            dispatched.append((work_item_id, origin_session_id))
             return object()
 
     monkeypatch.setattr(cli_module, "_resolve_config_path", lambda *_args: tmp_path / "demo.toml")
@@ -76,10 +77,64 @@ def test_dispatch_canonicalizes_qualified_github_issue(monkeypatch, tmp_path: Pa
     monkeypatch.setattr(cli_module, "JobStore", Store)
     monkeypatch.setattr(cli_module, "job_as_dict", lambda _job: {})
     monkeypatch.setattr(cli_module, "_print", lambda _value: None)
+    monkeypatch.setattr(
+        cli_module,
+        "AoRunner",
+        lambda *_args, **_kwargs: type(
+            "Runner",
+            (),
+            {
+                "get_session": lambda _self, _session_id: AgentSession(
+                    "demo-orchestrator",
+                    "orchestrator",
+                    "idle",
+                    "claude-code",
+                    project_id="demo",
+                )
+            },
+        )(),
+    )
 
+    monkeypatch.setenv("AO_SESSION_ID", "demo-orchestrator")
     cli_module.dispatch("github:owner/repo#0194")
 
-    assert dispatched == ["194"]
+    assert dispatched == [("194", "demo-orchestrator")]
+
+
+def test_dispatch_rejects_worker_as_notification_origin(monkeypatch, tmp_path: Path) -> None:
+    config = AppConfig(
+        supervisor=SupervisorConfig(runtime_dir=tmp_path),
+        project=ProjectConfig(id="demo"),
+        tracker=TrackerConfig(repository="owner/repo"),
+    )
+    monkeypatch.setattr(cli_module, "_resolve_config_path", lambda *_args: tmp_path / "demo.toml")
+    monkeypatch.setattr(cli_module, "_load_runtime_config", lambda _path: config)
+    monkeypatch.setenv("AO_SESSION_ID", "demo-worker")
+    monkeypatch.setattr(
+        cli_module,
+        "AoRunner",
+        lambda *_args, **_kwargs: type(
+            "Runner",
+            (),
+            {
+                "get_session": lambda _self, _session_id: AgentSession(
+                    "demo-worker",
+                    "worker",
+                    "working",
+                    "claude-code",
+                    project_id="demo",
+                )
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "start_service",
+        lambda _path: pytest.fail("invalid origin must be rejected before service start"),
+    )
+
+    with pytest.raises(typer.BadParameter, match="active orchestrator"):
+        cli_module.dispatch("194")
 
 
 def test_bind_account_session_requires_restart(monkeypatch) -> None:

@@ -14,7 +14,12 @@ from agent_workflow_supervisor.config import (
     SupervisorConfig,
     TrackerConfig,
 )
-from agent_workflow_supervisor.service import JobStore, reconcile_job
+from agent_workflow_supervisor.models import AgentSession
+from agent_workflow_supervisor.service import (
+    JobStore,
+    deliver_pending_notifications,
+    reconcile_job,
+)
 
 
 def _service_config(tmp_path: Path) -> AppConfig:
@@ -222,6 +227,10 @@ def test_existing_job_database_migrates_approval_binding_columns(tmp_path: Path)
 
     assert job.approval_change_id is None
     assert job.approval_target_sha is None
+    assert job.origin_session_id is None
+    assert job.notification_key is None
+    assert job.notified_key is None
+    assert job.notification_error is None
     assert legacy is not None
     assert legacy.approval is None
 
@@ -229,14 +238,165 @@ def test_existing_job_database_migrates_approval_binding_columns(tmp_path: Path)
 def test_dispatch_queue_is_idempotent_and_rejects_early_approval(tmp_path: Path) -> None:
     store = JobStore(tmp_path)
 
-    first = store.dispatch("42")
+    first = store.dispatch("42", origin_session_id="orchestrator-1")
     second = store.dispatch("42")
 
     assert first.work_item_id == "42"
     assert second.created_at == first.created_at
+    assert second.origin_session_id == "orchestrator-1"
     assert len(store.list()) == 1
     with pytest.raises(ValueError, match="not waiting for approval"):
         store.approve("42", "approve", change_id="8", target_sha="abc")
+
+
+class NotificationRunner:
+    instance = None
+
+    def __init__(self, _command: str, *, repository: str | None = None) -> None:
+        self.repository = repository
+        self.sent: list[tuple[str, str]] = []
+        self.preferred = AgentSession(
+            "orchestrator-1",
+            "orchestrator",
+            "idle",
+            "claude-code",
+            project_id="demo",
+        )
+        self.sessions = [self.preferred]
+        NotificationRunner.instance = self
+
+    def get_session(self, _session_id: str) -> AgentSession | None:
+        return self.preferred
+
+    def list_sessions(self, _project_id: str) -> list[AgentSession]:
+        return self.sessions
+
+    def send(self, session_id: str, message: str) -> bool:
+        self.sent.append((session_id, message))
+        return True
+
+
+def test_completed_job_notifies_origin_orchestrator_once(monkeypatch, tmp_path: Path) -> None:
+    store = JobStore(tmp_path)
+    store.dispatch("42", origin_session_id="orchestrator-1")
+    store.update_result("42", status="completed", active=False)
+    runner = NotificationRunner("ao", repository="example/demo")
+    monkeypatch.setattr(service_module, "AoRunner", lambda *_args, **_kwargs: runner)
+
+    deliver_pending_notifications(_service_config(tmp_path), store)
+    deliver_pending_notifications(_service_config(tmp_path), store)
+
+    assert len(runner.sent) == 1
+    assert runner.sent[0][0] == "orchestrator-1"
+    message = runner.sent[0][1]
+    assert "completed successfully" in message
+    assert "oa status --project demo --work-item 42" in message
+    notified = store.get("42")
+    assert notified is not None
+    assert notified.notified_key == "completed"
+    assert notified.notification_error is None
+
+
+def test_notification_falls_back_to_only_active_orchestrator(monkeypatch, tmp_path: Path) -> None:
+    class ReplacementRunner(NotificationRunner):
+        def __init__(self, command: str, *, repository: str | None = None) -> None:
+            super().__init__(command, repository=repository)
+            self.preferred = AgentSession(
+                "orchestrator-old",
+                "orchestrator",
+                "terminated",
+                "claude-code",
+                terminated=True,
+                project_id="demo",
+            )
+            self.sessions = [
+                self.preferred,
+                AgentSession(
+                    "orchestrator-new",
+                    "orchestrator",
+                    "idle",
+                    "claude-code",
+                    project_id="demo",
+                ),
+            ]
+            ReplacementRunner.instance = self
+
+    store = JobStore(tmp_path)
+    store.dispatch("42", origin_session_id="orchestrator-old")
+    store.update_result("42", status="completed", active=False)
+    runner = ReplacementRunner("ao", repository="example/demo")
+    monkeypatch.setattr(service_module, "AoRunner", lambda *_args, **_kwargs: runner)
+
+    deliver_pending_notifications(_service_config(tmp_path), store)
+
+    assert [session_id for session_id, _message in runner.sent] == ["orchestrator-new"]
+
+
+def test_new_approval_head_creates_a_new_notification(monkeypatch, tmp_path: Path) -> None:
+    store = JobStore(tmp_path)
+    store.dispatch("42", origin_session_id="orchestrator-1")
+    runner = NotificationRunner("ao", repository="example/demo")
+    monkeypatch.setattr(service_module, "AoRunner", lambda *_args, **_kwargs: runner)
+
+    store.update_result(
+        "42",
+        status="awaiting_approval",
+        active=True,
+        approval_gate=("8", "A"),
+    )
+    deliver_pending_notifications(_service_config(tmp_path), store)
+    store.update_result(
+        "42",
+        status="awaiting_approval",
+        active=True,
+        approval_gate=("8", "B"),
+    )
+    deliver_pending_notifications(_service_config(tmp_path), store)
+
+    assert len(runner.sent) == 2
+    assert "head A" in runner.sent[0][1]
+    assert "head B" in runner.sent[1][1]
+
+
+def test_ambiguous_notification_target_is_persisted_without_changing_workflow(
+    monkeypatch, tmp_path: Path
+) -> None:
+    class AmbiguousRunner(NotificationRunner):
+        def __init__(self, command: str, *, repository: str | None = None) -> None:
+            super().__init__(command, repository=repository)
+            self.preferred = AgentSession(
+                "orchestrator-old",
+                "orchestrator",
+                "terminated",
+                "claude-code",
+                terminated=True,
+                project_id="demo",
+            )
+            self.sessions = [
+                AgentSession(
+                    session_id,
+                    "orchestrator",
+                    "idle",
+                    "claude-code",
+                    project_id="demo",
+                )
+                for session_id in ("orchestrator-a", "orchestrator-b")
+            ]
+
+    store = JobStore(tmp_path)
+    store.dispatch("42", origin_session_id="orchestrator-old")
+    store.update_result("42", status="completed", active=False)
+    runner = AmbiguousRunner("ao", repository="example/demo")
+    monkeypatch.setattr(service_module, "AoRunner", lambda *_args, **_kwargs: runner)
+
+    deliver_pending_notifications(_service_config(tmp_path), store)
+
+    failed = store.get("42")
+    assert failed is not None
+    assert failed.status == "completed"
+    assert failed.notified_key is None
+    assert "cannot choose a replacement orchestrator" in str(failed.notification_error)
+    assert runner.sent == []
 
 
 def test_approval_is_bound_to_current_change_and_head(tmp_path: Path) -> None:

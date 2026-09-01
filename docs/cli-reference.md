@@ -33,6 +33,12 @@ or from an intentional automation.
 Dispatch does not scan for other issues. Re-dispatching an active work item does
 not create a duplicate queue row.
 
+In AO mode, dispatch captures `AO_SESSION_ID` when the command is executed by an
+orchestrator. Approval gates, completion, and actionable blockers are then sent
+back to that live conversation once per durable state transition. Dispatch from
+an external terminal does not invent a notification target and remains
+headless.
+
 For the built-in GitHub tracker, `194`, `#194`,
 `github:owner/repository#194`, and that repository's full GitHub issue URL are
 one canonical work item. A qualified reference to another repository is

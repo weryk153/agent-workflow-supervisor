@@ -4,6 +4,22 @@ Notable changes are documented here. This project follows semantic versioning
 after its first stable release; pre-1.0 releases may still change configuration
 with an explicit migration note.
 
+## Unreleased
+
+### Added
+
+- AO-originated dispatches now remember the live orchestrator session and
+  report approval gates, completion, and actionable blockers back to that
+  conversation. Notification state is persisted for duplicate suppression,
+  failures remain visible without changing workflow status, and a replaced
+  origin falls back only to a single unambiguous active orchestrator.
+
+### Compatibility
+
+- Existing `jobs.sqlite` databases add nullable notification columns
+  automatically. Existing jobs and dispatches from external terminals remain
+  headless because no origin session can be proven.
+
 ## 0.3.0 - 2026-09-01
 
 ### Added
