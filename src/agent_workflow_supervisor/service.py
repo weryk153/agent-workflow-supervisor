@@ -149,9 +149,7 @@ class JobStore:
                 "notification_error",
             ):
                 if column not in columns:
-                    connection.execute(
-                        f"ALTER TABLE supervisor_jobs ADD COLUMN {column} TEXT"
-                    )
+                    connection.execute(f"ALTER TABLE supervisor_jobs ADD COLUMN {column} TEXT")
             # Older releases could queue a decision before these binding
             # columns existed. Such a decision cannot be proven to authorize
             # any current gate, so migration must invalidate it.
@@ -178,12 +176,8 @@ class JobStore:
                 str(row["approval_target_sha"]) if row["approval_target_sha"] else None
             ),
             last_error=str(row["last_error"]) if row["last_error"] else None,
-            origin_session_id=(
-                str(row["origin_session_id"]) if row["origin_session_id"] else None
-            ),
-            notification_key=(
-                str(row["notification_key"]) if row["notification_key"] else None
-            ),
+            origin_session_id=(str(row["origin_session_id"]) if row["origin_session_id"] else None),
+            notification_key=(str(row["notification_key"]) if row["notification_key"] else None),
             notified_key=str(row["notified_key"]) if row["notified_key"] else None,
             notification_error=(
                 str(row["notification_error"]) if row["notification_error"] else None
@@ -192,9 +186,7 @@ class JobStore:
             updated_at=str(row["updated_at"]),
         )
 
-    def dispatch(
-        self, work_item_id: str, *, origin_session_id: str | None = None
-    ) -> QueuedWork:
+    def dispatch(self, work_item_id: str, *, origin_session_id: str | None = None) -> QueuedWork:
         now = utc_now()
         with self._transaction() as connection:
             connection.execute(
@@ -457,9 +449,7 @@ class JobStore:
             )
 
 
-def _notification_key(
-    status: str, approval_gate: tuple[str, str] | None = None
-) -> str | None:
+def _notification_key(status: str, approval_gate: tuple[str, str] | None = None) -> str | None:
     if status not in NOTIFIABLE_STATUSES:
         return None
     if status == "awaiting_approval":
@@ -469,9 +459,7 @@ def _notification_key(
 
 
 def _notification_message(config: AppConfig, job: QueuedWork) -> str:
-    status_command = (
-        f"oa status --project {config.project.id} --work-item {job.work_item_id}"
-    )
+    status_command = f"oa status --project {config.project.id} --work-item {job.work_item_id}"
     if job.status == "awaiting_approval":
         return (
             f"Durable supervisor update for work item #{job.work_item_id}: the workflow is "
@@ -501,9 +489,7 @@ def _notification_message(config: AppConfig, job: QueuedWork) -> str:
     )
 
 
-def _notification_target(
-    runner: AoRunner, project_id: str, preferred_session_id: str
-) -> str:
+def _notification_target(runner: AoRunner, project_id: str, preferred_session_id: str) -> str:
     preferred = runner.get_session(preferred_session_id)
     if (
         preferred is not None
