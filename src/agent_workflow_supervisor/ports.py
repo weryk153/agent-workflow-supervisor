@@ -24,6 +24,7 @@ class RunnerPort(Protocol):
         work_item: WorkItem,
         harness: str,
         model: str | None,
+        provider: str | None,
         credential_profile: str | None,
         prompt: str,
     ) -> AgentSession: ...
@@ -34,7 +35,7 @@ class RunnerPort(Protocol):
 
     def cancel_review(self, session_id: str) -> None: ...
 
-    def send(self, session_id: str, message: str) -> None: ...
+    def send(self, session_id: str, message: str) -> bool: ...
 
     def terminate(self, project_id: str, session_id: str) -> None: ...
 

@@ -45,6 +45,7 @@ ReviewVerdict = Literal["approved", "changes_requested", "pending", "unknown"]
 class ReviewResult:
     status: str
     verdict: ReviewVerdict = "unknown"
+    feedback: str = ""
     change_id: str | None = None
     change_url: str = ""
     target_sha: str = ""

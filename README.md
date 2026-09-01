@@ -2,37 +2,39 @@
 
 <h1>Agent Workflow Supervisor</h1>
 
-<h3>Durable issue-to-merge orchestration for Agent Orchestrator.</h3>
+<h3>Durable issue-to-merge orchestration, with or without Agent Orchestrator.</h3>
 
 </div>
 
-Agent Workflow Supervisor gives
-[Agent Orchestrator](https://aoagents.dev/) long-running workflows for moving
-an issue through implementation, review, approval, and merge. If an
-orchestrator or worker session stops, the workflow state remains available and
-can continue from its last durable checkpoint.
+Agent Workflow Supervisor moves an issue through implementation, independent
+review, approval, and merge while preserving workflow state across restarts.
+It uses [LangGraph](https://github.com/langchain-ai/langgraph) for durable
+policy and supports two execution modes:
 
-AO stays at the center of the experience. It remains the desktop interface,
-session manager, worktree owner, and agent runner. This package uses
-[LangGraph](https://github.com/langchain-ai/langgraph) to coordinate policy and
-delivery state around those AO sessions.
+- **AO mode** keeps [Agent Orchestrator](https://aoagents.dev/) as the desktop
+  interface, session manager, worktree owner, and agent runner.
+- **Process mode** creates its own isolated git worktrees and directly runs
+  Claude Code, Codex, or OpenCode on macOS, Linux, or WSL. AO is not installed,
+  opened, or queried. Native Windows uses AO mode because process mode requires
+  POSIX process-group ownership for safe shutdown.
 
-Install version 0.2.1 from GitHub:
+Install version 0.3.0 from GitHub:
 
 ```bash
-uv tool install git+https://github.com/weryk153/agent-workflow-supervisor.git@v0.2.1
+uv tool install git+https://github.com/weryk153/agent-workflow-supervisor.git@v0.3.0
 ```
 
 Then follow the [installation guide](docs/installation.md) for one-time project
-integration and a safe shadow-mode check. After setup, normal operation happens
-inside AO rather than in a separate terminal.
+integration and a safe shadow-mode check. AO-mode projects are normally
+controlled from the AO conversation; process-mode projects run headlessly and
+use the same `oa` status, dispatch, and approval interface.
 
 ## Why use Agent Workflow Supervisor?
 
 - **Durable execution** — work queues and LangGraph checkpoints survive
   supervisor and agent-session restarts.
-- **AO-first operation** — users dispatch work, check progress, approve changes,
-  and select accounts from the AO orchestrator conversation.
+- **Choice of execution plane** — operate conversationally through AO or run a
+  headless supervisor with the same graph and safety gates.
 - **Deterministic routing** — project policy chooses an eligible worker from
   configured labels, models, accounts, and capacity.
 - **No duplicate workers** — canonical per-work-item locks and durable
@@ -41,7 +43,7 @@ inside AO rather than in a separate terminal.
   limits plus shared model and login capacity across projects.
 - **Review and CI awareness** — delivery advances only when the current change
   has the required review and checks; a bounded watchdog recovers failed or
-  timed-out AO reviewers instead of waiting silently forever.
+  timed-out reviewers instead of waiting silently forever.
 - **User-selected merge control** — each project chooses automatic merge or a
   manual, head-bound approval gate; protected labels always pause.
 - **Guarded merge** — stale approval cannot merge a newer, unreviewed commit.
@@ -53,6 +55,9 @@ inside AO rather than in a separate terminal.
 The supervisor talks to AO through its public local CLI. It does not embed,
 patch, fork, or replace the AO app. AO continues to show the real sessions,
 worktrees, pull requests, and live agent state.
+
+This integration is optional. See [Running without AO](docs/process-runner.md)
+for the headless process runner.
 
 ## Work from the AO conversation
 
@@ -82,8 +87,9 @@ terminal.
 ## What happens after dispatch
 
 1. The supervisor reads the issue and applies project routing policy.
-2. It checks capacity and reuses or acquires an eligible AO worker.
-3. The worker implements the change in its AO-managed workspace.
+2. It checks capacity and reuses or acquires an eligible worker.
+3. The worker implements the change in an isolated worktree owned by the
+   configured runner.
 4. The supervisor reconciles the pull request, current-head review, and CI.
 5. Manual-merge projects and protected work pause for human approval, then
    recheck every change gate.
@@ -98,8 +104,8 @@ begins with an explicit request from the user or an intentional automation.
 
 The built-in workflow combines:
 
-- **Agent Orchestrator** for orchestrator and worker sessions, worktrees,
-  terminals, and agent execution.
+- **Agent Orchestrator or the built-in process runner** for sessions,
+  worktrees, and agent execution.
 - **GitHub** for issues, pull requests, reviews, checks, and merge state.
 - **LangGraph with SQLite** for local checkpoints and approval interrupts.
 - **Isolated Claude logins** with explicit per-project account assignment.
@@ -110,9 +116,9 @@ The package does not prescribe personal roles such as “Claude implements” or
 “Codex makes art.” Harness roles, model choices, research policy, label meaning,
 and capacity belong to operator configuration.
 
-The graph depends on `RunnerPort` and `TrackerPort`. Other execution runtimes or
-trackers can be supported with new adapters without placing their SDKs in the
-workflow graph.
+The graph depends on `RunnerPort` and `TrackerPort`. `AoRunner` and
+`ProcessRunner` implement the same execution contract without placing provider
+SDKs in the workflow graph.
 
 ## Safety
 
@@ -133,6 +139,11 @@ workflow graph.
 - Service ownership is verified from an atomic record and live process command
   before stop signals are sent; one lifetime lock permits one daemon per
   project runtime directory.
+- Process-mode helper shutdown additionally verifies a per-launch task token
+  carried by the driver process group, and retains the worktree whenever a
+  surviving process cannot yet be ruled out. Reviewer claims are atomic and
+  require an exact head plus a clean, read-only worktree; the verdict is
+  persisted before its GitHub comment so recovery cannot silently change it.
 - Numeric, qualified, and GitHub-URL forms of the same issue share one queue,
   checkpoint, worker lookup, and acquisition identity.
 - Model profiles select existing runtimes; they do not download or redistribute
@@ -145,6 +156,8 @@ Read [Architecture and safety boundaries](docs/architecture.md) and the
 
 - [Installation](docs/installation.md) — one-time setup and first safe workflow
 - [AO integration](docs/ao-integration.md) — conversation behavior and recovery
+- [Running without AO](docs/process-runner.md) — direct Claude, Codex, and
+  OpenCode execution
 - [Configuration](docs/configuration.md) — project policy and precedence
 - [Multiple Claude logins](docs/multiple-claude-logins.md) — isolated accounts
 - [Model profiles](docs/model-profiles.md) — hosted and local models
@@ -157,8 +170,9 @@ Read [Architecture and safety boundaries](docs/architecture.md) and the
 ## Project status
 
 This is an early-stage, local, single-process supervisor. The included adapters
-support AO and GitHub. SQLite is intended for one local supervisor; a
-multi-process deployment needs a shared queue and PostgreSQL checkpointer.
+support AO, direct local processes, and GitHub. SQLite is intended for one
+local supervisor; a multi-process deployment needs a shared queue and
+PostgreSQL checkpointer.
 
 ## License
 

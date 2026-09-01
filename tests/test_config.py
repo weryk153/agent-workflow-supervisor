@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from agent_workflow_supervisor.config import load_config
+from agent_workflow_supervisor.config import RunnerConfig, load_config
 from agent_workflow_supervisor.registry import (
     register_model_profile,
     register_project,
@@ -148,3 +148,56 @@ labels_any = ["agent:local"]
     assert config.policy.default_model_profile == "local-qwen"
     assert config.policy.model_profiles["local-qwen"].harness == "opencode"
     assert config.policy.model_profiles["local-qwen"].model == "ollama/qwen3-coder"
+
+
+def test_load_config_resolves_process_runner_paths(tmp_path: Path) -> None:
+    config_path = tmp_path / "supervisor.toml"
+    config_path.write_text(
+        """
+[project]
+id = "demo"
+
+[runner]
+type = "process"
+repository_path = "."
+worktree_root = "../worktrees"
+
+[tracker]
+repository = "owner/repo"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path)
+
+    assert config.runner.type == "process"
+    assert config.runner.repository_path == tmp_path
+    assert config.runner.worktree_root == tmp_path.parent / "worktrees"
+    assert config.runner.commands["claude-code"] == "claude"
+
+
+def test_process_config_rejects_conflicting_codex_approval_sandbox(tmp_path: Path) -> None:
+    config_path = tmp_path / "supervisor.toml"
+    config_path.write_text(
+        """
+[project]
+id = "demo"
+
+[runner]
+type = "process"
+codex_sandbox = "read-only"
+codex_approve_for_me = true
+
+[tracker]
+repository = "owner/repo"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValidationError, match="codex_approve_for_me"):
+        load_config(config_path)
+
+
+def test_process_config_rejects_review_harness_without_read_only_mode() -> None:
+    with pytest.raises(ValidationError, match="read-only mode"):
+        RunnerConfig(type="process", review_harness="opencode")

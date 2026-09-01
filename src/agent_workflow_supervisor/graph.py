@@ -51,6 +51,7 @@ class SupervisorState(TypedDict, total=False):
     work_item_url: str
     harness: str
     model: str
+    provider: str
     model_profile: str
     model_capacity: int
     credential_profile: str
@@ -374,6 +375,7 @@ def build_supervisor_graph(deps: SupervisorDependencies, checkpointer: Any = Non
         return {
             "harness": selection.harness,
             "model": selection.model or "",
+            "provider": selection.provider or "",
             "model_profile": selection.profile or "",
             "model_capacity": selection.capacity or 0,
             "requires_approval": requires_approval(item, config.policy),
@@ -661,6 +663,7 @@ def build_supervisor_graph(deps: SupervisorDependencies, checkpointer: Any = Non
                     work_item=item,
                     harness=state["harness"],
                     model=state.get("model") or None,
+                    provider=state.get("provider") or None,
                     credential_profile=credential_profile or None,
                     prompt=prompt,
                 )
@@ -803,6 +806,19 @@ def build_supervisor_graph(deps: SupervisorDependencies, checkpointer: Any = Non
             review_target_sha=review.target_sha,
         )
         if review.verdict == "changes_requested":
+            feedback_already_sent = (
+                state.get("review_status") == "feedback_sent"
+                and state.get("review_target_sha") == review.target_sha
+                and state.get("review_run_id", "") == review.run_id
+            )
+            if feedback_already_sent:
+                return {
+                    **base,
+                    "review_status": "feedback_sent",
+                    "review_run_id": review.run_id,
+                    "status": "worker_running",
+                    "events": [f"waiting for {worker.id} to address review feedback"],
+                }
             return {
                 **base,
                 "review_worker_id": worker.id,
@@ -953,6 +969,51 @@ def build_supervisor_graph(deps: SupervisorDependencies, checkpointer: Any = Non
             "status": "review_pending",
         }
 
+    def return_review_feedback(state: SupervisorState) -> dict[str, Any]:
+        review = runner.get_review(state["worker_id"])
+        if review is None or review.verdict != "changes_requested":
+            return {
+                "status": "review_pending",
+                "events": ["review feedback was no longer available"],
+            }
+        feedback = review.feedback.strip() or (
+            "The independent review requested changes. Inspect the latest review attached "
+            "to the pull request and address every blocking finding."
+        )
+        delivered = True
+        if not config.supervisor.shadow_mode:
+            delivered = runner.send(
+                state["worker_id"],
+                f"Review changes were requested for {review.change_url or review.change_id}. "
+                f"{feedback}\n\nFix the findings, verify the result, and push updates to the "
+                "same pull request.",
+            )
+        if not delivered:
+            return {
+                "review_status": "feedback_starting",
+                "review_verdict": "changes_requested",
+                "review_target_sha": review.target_sha,
+                "review_worker_id": state["worker_id"],
+                "review_run_id": review.run_id,
+                "status": "changes_requested",
+                "events": [f"waiting to deliver review feedback to {state['worker_id']}"],
+            }
+        return {
+            "review_status": "feedback_sent",
+            "review_verdict": "pending",
+            "review_target_sha": review.target_sha,
+            "review_triggered_for_sha": "",
+            "review_worker_id": state["worker_id"],
+            "review_run_id": review.run_id,
+            "review_started_at": "",
+            "review_attempts": 0,
+            "status": "worker_running",
+            "events": [
+                f"{'shadow: would return' if config.supervisor.shadow_mode else 'returned'} "
+                f"review feedback to {state['worker_id']}"
+            ],
+        }
+
     def verify_change(state: SupervisorState) -> dict[str, Any]:
         expected_sha = state.get("review_target_sha", "")
         if not expected_sha:
@@ -1051,6 +1112,7 @@ def build_supervisor_graph(deps: SupervisorDependencies, checkpointer: Any = Non
     graph.add_node("check_capacity", check_capacity)
     graph.add_node("ensure_worker", ensure_worker)
     graph.add_node("inspect_worker", inspect_worker)
+    graph.add_node("return_review_feedback", return_review_feedback)
     graph.add_node("verify_change", verify_change)
     graph.add_node("approval_gate", approval_gate)
     graph.add_node("merge_change", merge_change)
@@ -1091,12 +1153,20 @@ def build_supervisor_graph(deps: SupervisorDependencies, checkpointer: Any = Non
         lambda state: (
             "cleanup"
             if state["status"] == "report_completed"
+            else "feedback"
+            if state["status"] == "changes_requested"
             else "verify"
             if state["status"] == "review_approved"
             else "stop"
         ),
-        {"stop": END, "verify": "verify_change", "cleanup": "cleanup_worker"},
+        {
+            "stop": END,
+            "feedback": "return_review_feedback",
+            "verify": "verify_change",
+            "cleanup": "cleanup_worker",
+        },
     )
+    graph.add_edge("return_review_feedback", END)
     graph.add_conditional_edges(
         "verify_change",
         lambda state: (

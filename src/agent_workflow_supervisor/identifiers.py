@@ -6,6 +6,43 @@ import re
 from urllib.parse import urlparse
 
 
+def canonical_github_repository(remote: str) -> str:
+    """Return ``owner/repository`` for an exact github.com Git remote."""
+
+    value = remote.strip()
+    host: str | None = None
+    path = ""
+    if "://" in value:
+        parsed = urlparse(value)
+        host = parsed.hostname
+        path = parsed.path
+        if parsed.params or parsed.query or parsed.fragment:
+            raise ValueError(f"only plain GitHub repository remotes are supported: {remote}")
+    else:
+        scp = re.fullmatch(r"(?:[^@/:\s]+@)?([^/:\s]+):(.+)", value)
+        if scp:
+            host, path = scp.groups()
+        else:
+            bare = re.fullmatch(r"([^/\s]+)/(.+)", value)
+            if bare:
+                host, path = bare.groups()
+    if host is None or host.casefold() != "github.com":
+        raise ValueError(f"only GitHub remotes are supported by the built-in tracker: {remote}")
+    parts = path.strip("/").split("/")
+    if len(parts) != 2:
+        raise ValueError(f"invalid GitHub repository remote: {remote}")
+    owner, repository = parts
+    if repository.endswith(".git"):
+        repository = repository[:-4]
+    if (
+        not owner
+        or not repository
+        or any(not re.fullmatch(r"[A-Za-z0-9_.-]+", component) for component in (owner, repository))
+    ):
+        raise ValueError(f"invalid GitHub repository remote: {remote}")
+    return f"{owner}/{repository}"
+
+
 def canonical_github_issue_id(
     value: str,
     repository: str,

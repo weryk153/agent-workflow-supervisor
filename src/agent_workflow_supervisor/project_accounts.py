@@ -12,13 +12,13 @@ import sys
 import uuid
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 from tomlkit import document, dumps, parse, table
 
 from agent_workflow_supervisor.accounts import DATA_ROOT, _auth_status, _write_document
 from agent_workflow_supervisor.adapters.command import AdapterCommandError, CommandAdapter
 from agent_workflow_supervisor.config import load_config
+from agent_workflow_supervisor.identifiers import canonical_github_repository
 from agent_workflow_supervisor.locking import (
     account_switch_id,
     attach_account_switch_helper,
@@ -40,38 +40,7 @@ from agent_workflow_supervisor.registry import (
 
 
 def _github_repository(remote: str) -> str:
-    value = remote.strip()
-    host: str | None = None
-    path = ""
-    if "://" in value:
-        parsed = urlparse(value)
-        host = parsed.hostname
-        path = parsed.path
-        if parsed.params or parsed.query or parsed.fragment:
-            raise ValueError(f"only plain GitHub repository remotes are supported: {remote}")
-    else:
-        scp = re.fullmatch(r"(?:[^@/:\s]+@)?([^/:\s]+):(.+)", value)
-        if scp:
-            host, path = scp.groups()
-        else:
-            bare = re.fullmatch(r"([^/\s]+)/(.+)", value)
-            if bare:
-                host, path = bare.groups()
-    if host is None or host.casefold() != "github.com":
-        raise ValueError(f"only GitHub remotes are supported by the built-in tracker: {remote}")
-    parts = path.strip("/").split("/")
-    if len(parts) != 2:
-        raise ValueError(f"invalid GitHub repository remote: {remote}")
-    owner, repository = parts
-    if repository.endswith(".git"):
-        repository = repository[:-4]
-    if (
-        not owner
-        or not repository
-        or any(not re.fullmatch(r"[A-Za-z0-9_.-]+", component) for component in (owner, repository))
-    ):
-        raise ValueError(f"invalid GitHub repository remote: {remote}")
-    return f"{owner}/{repository}"
+    return canonical_github_repository(remote)
 
 
 def _verify_execution_remote(clone_dir: Path, expected_remote: str) -> None:
@@ -417,22 +386,33 @@ def _set_project_accounts_unlocked(
     if len(accounts) > total_capacity:
         raise ValueError(f"{len(accounts)} accounts exceed Claude capacity {total_capacity}")
 
-    ao = CommandAdapter(config.runner.command)
-    response = ao.run_json("project", "get", project_id, "--json")
-    base_project = response.get("project")
-    if not isinstance(base_project, dict):
-        raise RuntimeError(f"AO project {project_id!r} was not found")
-    model = _claude_worker_model(config)
-    if any(account.name == "default" for account in accounts):
-        base_project = _reconcile_default_account_project(ao, base_project)
-    execution_ids: dict[str, str] = {}
-    for account in accounts:
-        if account.name == "default":
-            execution_ids[account.name] = project_id
-        else:
-            execution_ids[account.name] = _ensure_execution_project(
-                ao=ao, base_project=base_project, account=account, model=model
-            )
+    ao: CommandAdapter | None = None
+    base_project: dict[str, Any] | None = None
+    if config.runner.type == "process":
+        # Process profiles are logical capacity namespaces. They all share the
+        # configured repository, while each Claude subprocess receives only
+        # its selected CLAUDE_CONFIG_DIR.
+        execution_ids = {
+            account.name: f"{project_id}-process-claude-{account.name}" for account in accounts
+        }
+    else:
+        ao = CommandAdapter(config.runner.command)
+        response = ao.run_json("project", "get", project_id, "--json")
+        raw_project = response.get("project")
+        if not isinstance(raw_project, dict):
+            raise RuntimeError(f"AO project {project_id!r} was not found")
+        base_project = raw_project
+        model = _claude_worker_model(config)
+        if any(account.name == "default" for account in accounts):
+            base_project = _reconcile_default_account_project(ao, base_project)
+        execution_ids = {}
+        for account in accounts:
+            if account.name == "default":
+                execution_ids[account.name] = project_id
+            else:
+                execution_ids[account.name] = _ensure_execution_project(
+                    ao=ao, base_project=base_project, account=account, model=model
+                )
 
     value = parse(config_path.read_text(encoding="utf-8"))
     credentials = value.get("credentials")
@@ -469,14 +449,15 @@ def _set_project_accounts_unlocked(
         accounts=account_names,
         path=registry_path,
     )
-    raw_config = base_project.get("config")
-    if isinstance(raw_config, dict):
+    raw_config = base_project.get("config") if base_project is not None else None
+    if ao is not None and isinstance(raw_config, dict):
         _install_orchestrator_rules(ao, project_id, raw_config)
     return {
         "project_id": project_id,
         "accounts": account_names,
         "execution_projects": execution_ids,
         "claude_capacity": total_capacity,
+        "runner": config.runner.type,
     }
 
 

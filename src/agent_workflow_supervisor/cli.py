@@ -143,6 +143,11 @@ def setup(
     """Install one project configuration as the default used by `oa`."""
     source_path = source.expanduser().resolve()
     document = toml_parse(source_path.read_text(encoding="utf-8"))
+    source_config = load_config(source_path)
+    if source_config.runner.type == "process":
+        runner = document.setdefault("runner", {})
+        runner["repository_path"] = str(source_config.runner.repository_path)
+        runner["worktree_root"] = str(source_config.runner.worktree_root)
     if apply:
         document.setdefault("supervisor", {})["shadow_mode"] = False
     DEFAULT_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -151,9 +156,13 @@ def setup(
     config = load_config(DEFAULT_CONFIG_PATH)
     register_account("default", config_dir=None)
     register_project(config.project.id, config_path=DEFAULT_CONFIG_PATH)
-    ao_rules = install_ao_orchestrator_rules(
-        config.project.id,
-        ao_command=config.runner.command,
+    ao_rules = (
+        install_ao_orchestrator_rules(
+            config.project.id,
+            ao_command=config.runner.command,
+        )
+        if config.runner.type == "ao"
+        else None
     )
     _print(
         {
@@ -161,6 +170,7 @@ def setup(
             "project_id": config.project.id,
             "shadow_mode": config.supervisor.shadow_mode,
             "merge_mode": config.policy.merge_mode,
+            "runner": config.runner.type,
             "ao_rules": ao_rules,
         }
     )
@@ -168,7 +178,7 @@ def setup(
 
 @app.command()
 def start(config_path: ConfigPath = None, project_id: ProjectId = None) -> None:
-    """Start AO if necessary, then start the background supervisor."""
+    """Start the configured runner and background supervisor."""
     resolved = _resolve_config_path(config_path, project_id)
     config = _load_runtime_config(resolved)
     pid = start_service(resolved)
@@ -180,6 +190,7 @@ def start(config_path: ConfigPath = None, project_id: ProjectId = None) -> None:
             "project_id": config.project.id,
             "shadow_mode": config.supervisor.shadow_mode,
             "merge_mode": config.policy.merge_mode,
+            "runner": config.runner.type,
             "log": str(log_path),
         }
     )
@@ -187,7 +198,7 @@ def start(config_path: ConfigPath = None, project_id: ProjectId = None) -> None:
 
 @app.command()
 def stop(config_path: ConfigPath = None, project_id: ProjectId = None) -> None:
-    """Stop the background supervisor without stopping AO workers."""
+    """Stop the background supervisor without stopping active workers."""
     resolved = _resolve_config_path(config_path, project_id)
     config = _load_runtime_config(resolved)
     stopped = stop_service(config)
@@ -342,15 +353,27 @@ def model_doctor(
         raise typer.BadParameter(f"model profile {name!r} is not registered") from error
     if config_path is not None or project_id is not None or DEFAULT_CONFIG_PATH.is_file():
         resolved = _resolve_config_path(config_path, project_id)
-        ao_command = _load_runtime_config(resolved).runner.command
+        runtime_config = _load_runtime_config(resolved)
+        ao_command = runtime_config.runner.command
+        runner_type = runtime_config.runner.type
+        process_commands = runtime_config.runner.commands
     else:
         ao_command = "ao"
-    _print(diagnose_model_profile(profile, ao_command=ao_command))
+        runner_type = "ao"
+        process_commands = None
+    _print(
+        diagnose_model_profile(
+            profile,
+            ao_command=ao_command,
+            runner_type=runner_type,
+            process_commands=process_commands,
+        )
+    )
 
 
 @project_app.command("accounts")
 def project_accounts(
-    project_id: Annotated[str, typer.Argument(help="AO project id")],
+    project_id: Annotated[str, typer.Argument(help="Supervisor project id")],
     selected: Annotated[
         str | None,
         typer.Option("--set", help="Comma-separated global account names"),

@@ -3,21 +3,16 @@
 The supervisor separates durable workflow policy from agent execution.
 
 ```text
-user in AO Desktop
-    │ explicit request
-    ▼
-AO orchestrator ── managed conversation rules ── oa command
+explicit user request or AO conversation
     │
     ▼
 LangGraph supervisor ───── registry.toml + project TOML ── GitHub issue / PR
     │                           │
     │ spawn/review/kill         │ accounts, models, routes, limits
     ▼                           │
-Agent Orchestrator              │
-    │                           │
-    ├── Claude Code             │
-    ├── Codex                   │
-    └── OpenCode ── local or remote model provider
+RunnerPort                      │
+    ├── AO ── Claude / Codex / OpenCode
+    └── ProcessRunner ── own worktree + Claude / Codex / OpenCode
 ```
 
 ## Responsibilities
@@ -33,19 +28,19 @@ Agent Orchestrator              │
 - Serializes final discovery, reservation, and spawn with nested canonical
   cross-process locks: one user-global allocation lock protects shared
   capacity, and one work-item lock protects worker identity. Under the global
-  lock it rescans AO, counts durable pending or unverified reservations as
-  occupied, and reruns project harness limits plus global model-profile and
-  login limits before spawning. Reservations persist the resolved model
-profile and login identity, so separate project configurations still contend
-for the same resource. A reservation also exposes the selected worker by
-session id even when two config versions contain different
-credential-project sets. Pending recovery scans the execution project
-recorded by the reservation rather than relying on the current config alone.
-The credential key first consults the AO execution project's dynamic binding,
-then falls back to the profile configuration. Consequently, rebinding a base
-AO project cannot make that project and a derived project count the same Claude
-login under two names.
-- Reconciles AO review state. Review run identity, start time, target SHA, and
+  lock it rescans the configured runner, counts durable pending or unverified
+  reservations as occupied, and reruns project harness limits plus global
+  model-profile and login limits before spawning. Reservations persist the
+  resolved model profile and login identity, so separate project
+  configurations still contend for the same resource. A reservation also
+  exposes the selected worker by session id even when two config versions
+  contain different credential-project sets. Pending recovery scans the
+  execution project recorded by the reservation rather than relying on the
+  current config alone. The credential key first consults the AO execution
+  project's dynamic binding, then falls back to the profile configuration.
+  Consequently, rebinding a base AO project cannot make that project and a
+  derived project count the same Claude login under two names.
+- Reconciles runner review state. Review run identity, start time, target SHA, and
   attempt count are checkpointed. A watchdog restarts a missing, failed, or
   timed-out run within a bounded budget and then exposes `review_stalled`
   instead of waiting silently forever.
@@ -63,6 +58,26 @@ login under two names.
 - Applies project-scoped environment and permission settings.
 - Runs the selected harness and model override.
 - Owns review sessions and their result metadata.
+
+AO is optional. These responsibilities apply only when `runner.type = "ao"`.
+
+### Process runner
+
+- Creates one unique git branch and worktree per worker.
+- Starts Claude Code, Codex, or OpenCode through noninteractive CLI contracts.
+- Persists process, provider-session, worktree, and review metadata in SQLite.
+- Resumes the original provider session when review changes are requested.
+- Discovers pull requests and posts review comments through `gh`.
+- Atomically claims each review attempt and feedback delivery in SQLite.
+- Validates the configured checkout's GitHub origin, the exact reviewed head,
+  and a clean worktree before and after a read-only reviewer turn.
+- Runs each provider CLI in a token-bearing process group, signals it only when
+  the live command matches the unique launch token stored in SQLite, and keeps
+  the worktree whenever a surviving group cannot yet be ruled out.
+- Persists reviewer verdicts before GitHub comment delivery and uses
+  comment-only recovery, preventing a crash from rerunning the model and
+  changing an already-decided verdict.
+- Never opens, checks, or depends on AO.
 
 ### GitHub
 
@@ -83,7 +98,7 @@ explicit dispatch
   → skip / select route
   → reuse worker or check capacity
   → select least-active credential profile
-  → spawn through AO
+  → spawn through the configured runner
   → inspect worker and review
   → verify current PR head and checks
   → optional policy/label approval interrupt
@@ -99,7 +114,9 @@ new work from repository labels and does not scan the issue tracker.
 
 - `jobs.sqlite` stores the explicit dispatch queue.
 - The configured LangGraph SQLite database stores workflow checkpoints.
-- AO stores execution sessions and worktrees independently.
+- AO stores its execution sessions and worktrees independently. Process mode
+  stores equivalent metadata in `process-runner/state.sqlite` and owns its git
+  worktrees directly.
 - `registry.toml` stores global non-secret assignments.
 - `supervisor.pid` is an atomic JSON ownership record containing the daemon
   PID, project id, resolved config path, and a random instance token. A
@@ -110,9 +127,9 @@ new work from repository labels and does not scan the issue tracker.
   switch ownership, and project operation locks independently of configurable
   runtime directories.
 
-A supervisor crash does not erase AO sessions or the workflow checkpoint. On
-restart, reconciliation resumes from the stored thread and attempts to reuse an
-active matching worker.
+A supervisor crash does not erase runner sessions or the workflow checkpoint.
+On restart, reconciliation resumes from the stored thread and attempts to reuse
+an active matching worker.
 
 Review watchdog fields are additive checkpoint state. Workflows created by
 older releases adopt AO's current review run and its `createdAt` timestamp on
@@ -134,9 +151,10 @@ AO execution project remain visible until it finishes and is cleaned up.
   approval interrupt; approval alone cannot bypass a changed gate.
 - A route/account-policy change and concurrent reconciliation cannot create a
   second active worker for the same work item through the supported runtime.
-- An uncertain spawn remains `worker_acquisition_pending` and fails closed until
-  AO state or an operator resolves it. A transient lookup cannot erase a known
-  worker reservation; it stops as `worker_reservation_unverified`.
+- An uncertain spawn remains `worker_acquisition_pending` and fails closed
+  until runner state or an operator resolves it. A transient lookup cannot
+  erase a known worker reservation; it stops as
+  `worker_reservation_unverified`.
 - Profile and account assignment are explicit per project.
 - Equivalent GitHub issue references are canonicalized before queue,
   checkpoint, AO-session comparison, and acquisition locking; another
@@ -154,9 +172,9 @@ AO execution project remain visible until it finishes and is cleaned up.
 ## Adapter boundaries
 
 `RunnerPort` and `TrackerPort` define the graph-facing interfaces. The built-in
-implementations are `AoRunner` and `GitHubTracker`. A new runner or tracker
-should translate its native state into the domain values in `models.py`; the
-graph should not import provider SDKs directly.
+implementations are `AoRunner`, `ProcessRunner`, and `GitHubTracker`. A new
+runner or tracker should translate its native state into the domain values in
+`models.py`; the graph should not import provider SDKs directly.
 
 The AO adapter uses structured chat mode for chat-capable harnesses. AO 0.12.9
 exposes Antigravity (`agy`) only through its TUI driver, so that harness is
@@ -192,7 +210,8 @@ abnormal exit instead of blocking the project indefinitely.
 
 - One local supervisor process per project; SQLite is not a multi-host queue.
 - Built-in tracker support is GitHub only.
-- Built-in runner support is AO only.
+- The process runner supports the Claude Code, Codex, and OpenCode CLI
+  contracts; arbitrary command templates are not yet a stable public API.
 - AO's session list does not expose every resolved model, so profile capacity
   counts all active workers sharing the harness.
 - Multiple isolated account support is currently specialized for Claude Code.

@@ -9,7 +9,7 @@ from typing import Any
 
 from langgraph.checkpoint.sqlite import SqliteSaver
 
-from agent_workflow_supervisor.adapters import AoRunner, GitHubTracker
+from agent_workflow_supervisor.adapters import AoRunner, GitHubTracker, ProcessRunner
 from agent_workflow_supervisor.config import AppConfig
 from agent_workflow_supervisor.graph import SupervisorDependencies, build_supervisor_graph
 from agent_workflow_supervisor.identifiers import canonical_github_issue_id
@@ -20,7 +20,17 @@ def graph_runtime(config: AppConfig) -> Iterator[Any]:
     database_path = config.supervisor.database_path
     database_path.parent.mkdir(parents=True, exist_ok=True)
     os.environ.setdefault("LANGGRAPH_STRICT_MSGPACK", "true")
-    runner = AoRunner(config.runner.command, repository=config.tracker.repository)
+    if config.runner.type == "ao":
+        runner = AoRunner(config.runner.command, repository=config.tracker.repository)
+    else:
+        runner = ProcessRunner(
+            config.runner,
+            repository=config.tracker.repository,
+            tracker_command=config.tracker.command,
+            runtime_dir=config.supervisor.runtime_dir,
+            credentials=config.credentials.profiles,
+            report_only_harnesses=config.policy.report_only_harnesses,
+        )
     tracker = GitHubTracker(config.tracker.repository, config.tracker.command)
     dependencies = SupervisorDependencies(config=config, runner=runner, tracker=tracker)
     with SqliteSaver.from_conn_string(str(database_path)) as checkpointer:

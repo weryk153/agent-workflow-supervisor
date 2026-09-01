@@ -85,3 +85,54 @@ def test_lmstudio_doctor_checks_served_and_opencode_models(monkeypatch) -> None:
         "opencode_cli",
         "opencode_model",
     ]
+
+
+def test_process_doctor_uses_configured_harness_command(monkeypatch) -> None:
+    monkeypatch.setattr(
+        health_module.shutil,
+        "which",
+        lambda name: name if name == "/opt/agents/custom-opencode" else None,
+    )
+
+    def fake_run(args, **kwargs):
+        assert args == [
+            "/opt/agents/custom-opencode",
+            "--profile",
+            "local",
+            "models",
+            "custom",
+        ]
+        return CompletedProcess(args, 0, stdout="custom/coder\n", stderr="")
+
+    monkeypatch.setattr(health_module.subprocess, "run", fake_run)
+    profile = ModelProfileRecord(
+        "custom-coder",
+        harness="opencode",
+        model="custom/coder",
+        provider="custom",
+    )
+
+    result = diagnose_model_profile(
+        profile,
+        runner_type="process",
+        process_commands={"opencode": "/opt/agents/custom-opencode --profile local"},
+    )
+
+    assert result["ready"]
+    assert result["checks"] == [
+        {
+            "check": "process_harness",
+            "ready": True,
+            "detail": "/opt/agents/custom-opencode --profile local",
+        },
+        {
+            "check": "opencode_cli",
+            "ready": True,
+            "detail": "/opt/agents/custom-opencode --profile local",
+        },
+        {
+            "check": "opencode_model",
+            "ready": True,
+            "detail": "custom/coder is visible to OpenCode",
+        },
+    ]

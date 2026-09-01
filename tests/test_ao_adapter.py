@@ -41,6 +41,7 @@ def test_spawn_uses_supported_mode(monkeypatch, harness: str, expected_mode: str
         work_item=WorkItem("42", "Research"),
         harness=harness,
         model=None,
+        provider=None,
         credential_profile=None,
         prompt="Investigate without editing.",
     )

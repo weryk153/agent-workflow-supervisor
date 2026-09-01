@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import shlex
 import shutil
 import subprocess
 import urllib.error
 import urllib.request
+from collections.abc import Mapping
 from typing import Any
 
 from agent_workflow_supervisor.adapters.command import AdapterCommandError, CommandAdapter
@@ -39,31 +41,63 @@ def _openai_compatible_models(url: str) -> tuple[set[str], str | None]:
 
 
 def diagnose_model_profile(
-    profile: ModelProfileRecord, *, ao_command: str = "ao"
+    profile: ModelProfileRecord,
+    *,
+    ao_command: str = "ao",
+    runner_type: str = "ao",
+    process_commands: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """Inspect local prerequisites without downloading models or changing configuration."""
 
     checks: list[dict[str, Any]] = []
-    try:
-        catalog = CommandAdapter(ao_command, timeout_seconds=10).run_json("agent", "ls", "--json")
-    except AdapterCommandError as error:
-        checks.append(_check("ao", False, str(error)))
-    else:
-        supported = {str(item.get("id")) for item in catalog.get("supported", [])}
-        installed = {str(item.get("id")) for item in catalog.get("installed", [])}
-        checks.append(
-            _check(
-                "ao_harness_supported",
-                profile.harness in supported,
-                f"AO {'supports' if profile.harness in supported else 'does not support'} "
-                f"{profile.harness}",
+    if runner_type == "ao":
+        try:
+            catalog = CommandAdapter(ao_command, timeout_seconds=10).run_json(
+                "agent", "ls", "--json"
             )
-        )
+        except AdapterCommandError as error:
+            checks.append(_check("ao", False, str(error)))
+        else:
+            supported = {str(item.get("id")) for item in catalog.get("supported", [])}
+            installed = {str(item.get("id")) for item in catalog.get("installed", [])}
+            checks.append(
+                _check(
+                    "ao_harness_supported",
+                    profile.harness in supported,
+                    f"AO {'supports' if profile.harness in supported else 'does not support'} "
+                    f"{profile.harness}",
+                )
+            )
+            checks.append(
+                _check(
+                    "ao_harness_installed",
+                    profile.harness in installed,
+                    f"{profile.harness} "
+                    f"{'is' if profile.harness in installed else 'is not'} installed",
+                )
+            )
+
+    default_harness_command = profile.harness.replace("claude-code", "claude")
+    configured_harness_command = (process_commands or {}).get(
+        profile.harness, default_harness_command
+    )
+    try:
+        harness_command = shlex.split(configured_harness_command)
+    except ValueError:
+        harness_command = []
+    executable = shutil.which(harness_command[0]) if harness_command else None
+    resolved_harness_command = [executable, *harness_command[1:]] if executable else []
+
+    if runner_type == "process":
         checks.append(
             _check(
-                "ao_harness_installed",
-                profile.harness in installed,
-                f"{profile.harness} {'is' if profile.harness in installed else 'is not'} installed",
+                "process_harness",
+                executable is not None,
+                (
+                    shlex.join(resolved_harness_command)
+                    if resolved_harness_command
+                    else f"{configured_harness_command} was not found"
+                ),
             )
         )
 
@@ -117,20 +151,24 @@ def diagnose_model_profile(
             )
 
     if profile.harness == "opencode":
-        opencode = shutil.which("opencode")
+        opencode_command = (
+            resolved_harness_command
+            if runner_type == "process"
+            else ([path] if (path := shutil.which("opencode")) else [])
+        )
         checks.append(
             _check(
                 "opencode_cli",
-                opencode is not None,
-                opencode or "opencode was not found on PATH",
+                bool(opencode_command),
+                shlex.join(opencode_command) if opencode_command else "opencode was not found",
             )
         )
-        if opencode is not None:
+        if opencode_command:
             # Filtering by provider keeps the output small. OpenCode 1.18.x can
             # truncate the unfiltered model catalog when stdout is captured,
             # which would make a configured model appear to be missing.
             provider = profile.provider or profile.model.partition("/")[0]
-            command = [opencode, "models"]
+            command = [*opencode_command, "models"]
             if provider:
                 command.append(provider)
             try:

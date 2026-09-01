@@ -551,7 +551,8 @@ def start_service(config_path: Path) -> int:
             )
         runtime_paths(config)[0].unlink(missing_ok=True)
 
-    ensure_ao_ready(config)
+    if config.runner.type == "ao":
+        ensure_ao_ready(config)
     pid_path, log_path = runtime_paths(config)
     pid_path.parent.mkdir(parents=True, exist_ok=True)
     instance_token = uuid.uuid4().hex
@@ -718,17 +719,20 @@ def serve(config_path: Path, instance_token: str) -> None:
             while not stopping:
                 jobs = store.list(active_only=True)
                 if jobs:
-                    try:
-                        ensure_ao_ready(config, timeout_seconds=10)
-                    except Exception as error:
-                        for job in jobs:
-                            store.update_result(
-                                job.work_item_id,
-                                status="waiting_for_ao",
-                                active=True,
-                                last_error=f"{type(error).__name__}: {error}",
-                            )
-                    else:
+                    runner_ready = True
+                    if config.runner.type == "ao":
+                        try:
+                            ensure_ao_ready(config, timeout_seconds=10)
+                        except Exception as error:
+                            runner_ready = False
+                            for job in jobs:
+                                store.update_result(
+                                    job.work_item_id,
+                                    status="waiting_for_ao",
+                                    active=True,
+                                    last_error=f"{type(error).__name__}: {error}",
+                                )
+                    if runner_ready:
                         for job in jobs:
                             if stopping:
                                 break

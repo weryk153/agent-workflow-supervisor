@@ -89,7 +89,12 @@ def test_model_profile_selects_harness_model_and_profile_capacity() -> None:
         default_model_profile="claude",
         model_profiles={
             "claude": ModelProfileConfig(harness="claude-code", model="claude-sonnet", capacity=2),
-            "local": ModelProfileConfig(harness="opencode", model="ollama/qwen3-coder", capacity=1),
+            "local": ModelProfileConfig(
+                harness="opencode",
+                model="ollama/qwen3-coder",
+                provider="ollama",
+                capacity=1,
+            ),
         },
         routes=[RouteRule(profile="local", labels_any={"agent:local"})],
     )
@@ -103,6 +108,7 @@ def test_model_profile_selects_harness_model_and_profile_capacity() -> None:
         "opencode",
         "ollama/qwen3-coder",
     )
+    assert local.provider == "ollama"
     assert default is not None and default.profile == "claude"
     sessions = [AgentSession("1", "worker", "working", "opencode")]
     assert not has_model_capacity(sessions, local, model_policy)

@@ -1,3 +1,4 @@
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,46 @@ from agent_workflow_supervisor.config import (
     TrackerConfig,
 )
 from agent_workflow_supervisor.registry import ModelProfileRecord, ProjectRecord
+
+
+def test_setup_process_mode_never_installs_ao_rules(monkeypatch, tmp_path: Path) -> None:
+    source = tmp_path / "source" / "process.toml"
+    source.parent.mkdir()
+    source.write_text(
+        """
+[project]
+id = "demo"
+
+[runner]
+type = "process"
+repository_path = "."
+worktree_root = "../worktrees"
+
+[tracker]
+repository = "owner/repo"
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    installed = tmp_path / "installed" / "config.toml"
+    monkeypatch.setattr(cli_module, "DEFAULT_CONFIG_PATH", installed)
+    monkeypatch.setattr(cli_module, "register_account", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli_module, "register_project", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        cli_module,
+        "install_ao_orchestrator_rules",
+        lambda *_args, **_kwargs: pytest.fail("process setup must not call AO"),
+    )
+    rendered: list[dict] = []
+    monkeypatch.setattr(cli_module, "_print", rendered.append)
+
+    cli_module.setup(source)
+
+    saved = tomllib.loads(installed.read_text(encoding="utf-8"))
+    assert saved["runner"]["repository_path"] == str(source.parent)
+    assert saved["runner"]["worktree_root"] == str(tmp_path / "worktrees")
+    assert rendered[0]["runner"] == "process"
+    assert rendered[0]["ao_rules"] is None
 
 
 def test_dispatch_canonicalizes_qualified_github_issue(monkeypatch, tmp_path: Path) -> None:

@@ -303,6 +303,69 @@ claude-code = ["claude-old"]
     assert saved["policy"]["credential_profiles"]["claude-code"] == ["claude-default"]
 
 
+def test_process_account_pool_uses_profiles_without_ao_projects(
+    monkeypatch, tmp_path: Path
+) -> None:
+    config_path = tmp_path / "demo.toml"
+    work_config = tmp_path / "claude-work"
+    work_config.mkdir()
+    config_path.write_text(
+        f"""
+[project]
+id = "demo"
+
+[runner]
+type = "process"
+repository_path = "{tmp_path}"
+worktree_root = "{tmp_path / "worktrees"}"
+
+[tracker]
+repository = "example/demo"
+
+[policy]
+default_harness = "claude-code"
+
+[policy.capacity]
+claude-code = 2
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        project_accounts_module,
+        "get_account",
+        lambda name, _path: AccountRecord(
+            name,
+            config_dir=work_config if name == "work" else None,
+        ),
+    )
+    monkeypatch.setattr(
+        project_accounts_module,
+        "_auth_status",
+        lambda _path: {"logged_in": True, "email": None, "organization": None},
+    )
+    monkeypatch.setattr(
+        project_accounts_module,
+        "CommandAdapter",
+        lambda *_args, **_kwargs: pytest.fail("process account assignment must not call AO"),
+    )
+
+    result = set_project_accounts(
+        "demo",
+        ["default", "work"],
+        config_path=config_path,
+        registry_path=tmp_path / "registry.toml",
+    )
+
+    saved = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    assert result["runner"] == "process"
+    assert result["execution_projects"] == {
+        "default": "demo-process-claude-default",
+        "work": "demo-process-claude-work",
+    }
+    assert saved["credentials"]["profiles"]["claude-work"]["claude_config_dir"] == str(work_config)
+
+
 class FakeAoCommandAdapter:
     instance = None
 

@@ -3,11 +3,10 @@
 Run `oa <command> --help` for the installed version's exact flags. Commands
 print JSON so they can be inspected or scripted.
 
-These commands are the integration surface between AO and the durable
-supervisor. After `oa setup` or `oa project register`, routine commands are
-normally selected and executed by the AO orchestrator in response to explicit
-conversation requests. Running them directly remains supported for bootstrap,
-scripts, diagnostics, and recovery.
+These commands are the public control surface for the durable supervisor. In AO
+mode, routine commands are selected and executed by the AO orchestrator in
+response to explicit conversation requests. In process mode, run them directly
+or from an intentional automation.
 
 ## Installation and validation
 
@@ -21,7 +20,7 @@ scripts, diagnostics, and recovery.
 
 | Command | Effect |
 |---|---|
-| `oa start [--project ID]` | Ensures AO is ready and starts the project supervisor. |
+| `oa start [--project ID]` | Ensures the configured runner is ready and starts the supervisor. |
 | `oa stop [--project ID]` | Stops only the supervisor process. |
 | `oa status [--project ID]` | Shows service and queue status. |
 | `oa status --work-item N [--project ID]` | Also shows the LangGraph checkpoint. |
@@ -58,10 +57,11 @@ workflow asks for approval again instead of reusing the decision.
 | `oa project bind-account ID --use NAME --restart --session SESSION` | Selects the exact orchestrator to replace when several are active. |
 | `oa project switch-account ID --use NAME` | AO-conversation form: schedules replacement after the current orchestrator turn becomes idle. |
 | `oa project accounts ID` | Shows the project's allowed Claude accounts. |
-| `oa project accounts ID --set A,B` | Replaces the allowed pool and creates required AO execution projects. |
+| `oa project accounts ID --set A,B` | Replaces the allowed pool; AO mode creates required execution projects. |
 
 Changing account assignment restarts the project supervisor only if it was
-already running. It does not terminate existing AO workers.
+already running. It does not terminate existing workers. Process mode injects
+the selected `CLAUDE_CONFIG_DIR` per worker and creates no extra project clone.
 
 Profiles removed from the allowed pool are retained internally for session
 discovery but are no longer eligible for new work. This allows an already

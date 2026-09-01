@@ -1,5 +1,6 @@
 import signal
 import sqlite3
+import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing, contextmanager
 from pathlib import Path
@@ -132,6 +133,59 @@ repository = "example/demo"
             pids = list(executor.map(service_module.start_service, [config_path, config_path]))
 
         assert pids[0] == pids[1]
+        assert service_module.service_running(config)
+    finally:
+        if service_module.service_running(config):
+            service_module.stop_service(config)
+
+
+def test_process_service_start_does_not_check_ao(monkeypatch, tmp_path: Path) -> None:
+    subprocess.run(["git", "init", "-b", "main", str(tmp_path)], check=True, capture_output=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(tmp_path),
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/example/demo.git",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    config_path = tmp_path / "process.toml"
+    config_path.write_text(
+        f"""
+[supervisor]
+database_path = "{tmp_path / "checkpoints.sqlite"}"
+runtime_dir = "{tmp_path / "runtime"}"
+poll_interval_seconds = 1
+
+[project]
+id = "process-service-test"
+
+[runner]
+type = "process"
+repository_path = "{tmp_path}"
+worktree_root = "{tmp_path / "worktrees"}"
+
+[tracker]
+repository = "example/demo"
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        service_module,
+        "ensure_ao_ready",
+        lambda *_args, **_kwargs: pytest.fail("process service must not check AO"),
+    )
+    config = service_module.load_config(config_path, registry_path=service_module.REGISTRY_PATH)
+
+    try:
+        pid = service_module.start_service(config_path)
+        assert pid > 0
         assert service_module.service_running(config)
     finally:
         if service_module.service_running(config):

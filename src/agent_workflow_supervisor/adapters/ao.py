@@ -58,6 +58,7 @@ class AoRunner:
         work_item: WorkItem,
         harness: str,
         model: str | None,
+        provider: str | None,
         credential_profile: str | None,
         prompt: str,
     ) -> AgentSession:
@@ -126,8 +127,9 @@ class AoRunner:
     def cancel_review(self, session_id: str) -> None:
         self.cli.run("review", "cancel", session_id)
 
-    def send(self, session_id: str, message: str) -> None:
+    def send(self, session_id: str, message: str) -> bool:
         self.cli.run("send", "--session", session_id, "--message", message)
+        return True
 
     def terminate(self, project_id: str, session_id: str) -> None:
         self.cli.run("session", "kill", session_id, "--project", project_id)

@@ -10,12 +10,11 @@ shadow mode, validate reads, and only then enable external mutations.
 - [uv](https://docs.astral.sh/uv/).
 - Git.
 - [GitHub CLI](https://cli.github.com/) authenticated with `gh auth login`.
-- Agent Orchestrator (`ao`) running and able to manage the target repository.
-- At least one AO worker harness, such as Claude Code, Codex, or OpenCode.
+- Either Agent Orchestrator (`ao`) or at least one direct worker CLI: Claude
+  Code, Codex, or OpenCode.
 
-The built-in runner and tracker adapters currently support AO and GitHub. The
-LangGraph layer is provider-neutral, but other runners and trackers require
-new `RunnerPort` or `TrackerPort` adapters.
+The built-in runner adapters support AO and direct local processes. The
+built-in tracker supports GitHub.
 
 The local-model integration was verified on 2026-08-31 with AO 0.12.9,
 OpenCode 1.18.8, LM Studio's `lms` CLI, and an MLX Qwen2.5 Coder 7B model. These
@@ -29,16 +28,17 @@ python3 --version
 uv --version
 git --version
 gh auth status
+# AO mode only
 ao status --json
 ao agent ls --json
 ```
 
 ## Install
 
-Install version 0.2.1 directly from GitHub:
+Install version 0.3.0 directly from GitHub:
 
 ```bash
-uv tool install git+https://github.com/weryk153/agent-workflow-supervisor.git@v0.2.1
+uv tool install git+https://github.com/weryk153/agent-workflow-supervisor.git@v0.3.0
 oa --help
 ```
 
@@ -60,6 +60,9 @@ uv tool install dist/agent_workflow_supervisor-*.whl --force
 ```
 
 ## Register the repository with AO
+
+Skip this section when using `runner.type = "process"`; continue with
+[Running without AO](process-runner.md) and start from `examples/process.toml`.
 
 The target must be a Git repository with a usable default branch and remote.
 AO creates worktrees from the remote branch, so a local-only commit without an
@@ -97,13 +100,14 @@ oa validate --project my-project
 ```
 
 `oa setup` copies the configuration into the supervisor's configuration
-directory, registers the project, and installs a managed command block in the
-AO project's orchestrator rules. It preserves orchestrator rules outside that
-managed block and does not modify the application repository. Without
+directory and registers the project. In AO mode it also installs a managed
+command block in the AO project's orchestrator rules. It preserves
+orchestrator rules outside that managed block and does not modify the
+application repository. Without
 `--apply`, `supervisor.shadow_mode` remains whatever the source file declares;
 the example declares `true`.
 
-From this point, AO is the normal interface. In the project's orchestrator
+In AO mode, AO is now the normal interface. In the project's orchestrator
 conversation, ask “Show the supervisor status” or “Handle issue #123.” The
 orchestrator runs the mapped `oa` command itself. See [AO integration](ao-integration.md)
 for the supported requests and the smaller set of tasks that still require a
@@ -116,7 +120,7 @@ issue from a terminal:
 oa tick --project my-project --work-item 123
 ```
 
-In shadow mode the supervisor may read AO and GitHub state, but it does not
+In shadow mode the supervisor may read runner and GitHub state, but it does not
 spawn or terminate sessions, trigger reviews, merge changes, or mutate pull
 requests.
 
@@ -136,14 +140,15 @@ own configuration management if you want a reproducible setup.
 
 ## Dispatch work
 
-The service does not scan GitHub autonomously. Normally, tell the AO
+The service does not scan GitHub autonomously. In AO mode, tell the
 orchestrator:
 
 ```text
 Handle issue #123.
 ```
 
-AO runs this command on your behalf:
+AO runs this command on your behalf. In process mode, run it directly or from
+your own intentional automation:
 
 ```bash
 oa dispatch 123 --project my-project
@@ -164,7 +169,7 @@ oa project merge-mode my-project
 oa project merge-mode my-project --set automatic
 ```
 
-Stopping the supervisor does not stop AO or existing AO workers:
+Stopping the supervisor does not stop existing workers:
 
 ```bash
 oa stop --project my-project

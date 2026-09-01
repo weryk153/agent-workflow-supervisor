@@ -4,6 +4,61 @@ Notable changes are documented here. This project follows semantic versioning
 after its first stable release; pre-1.0 releases may still change configuration
 with an explicit migration note.
 
+## 0.3.0 - 2026-09-01
+
+### Added
+
+- AO-independent `process` runner with owned git worktrees, detached agent
+  processes, SQLite session metadata, pull-request discovery, review execution,
+  review comments, resumable feedback turns, and safe cleanup.
+- Built-in noninteractive drivers for Claude Code, Codex, and OpenCode.
+- Native Codex local-provider routing for LM Studio and Ollama model profiles.
+- Per-process `CLAUDE_CONFIG_DIR` injection, allowing multiple Claude accounts
+  without AO execution projects or duplicate repository clones.
+- Process-runner setup example, configuration reference, recovery guide, and
+  unit/integration fixtures that run without AO.
+
+### Fixed
+
+- The background service now checks AO readiness only for AO configurations;
+  process mode never opens or queries AO.
+- Feedback delivery is durably claimed before a resume helper starts and is
+  acknowledged only after the provider process accepts the prompt. Recovery
+  preserves at-least-once semantics across the unavoidable post-delivery crash
+  window exposed by provider CLIs.
+- Reviewers are atomically claimed, tied to the exact local and remote head,
+  forced into read-only settings, and accepted only if the worktree remains
+  clean and the GitHub review comment succeeds. A verdict is persisted before
+  comment delivery, so comment-only recovery cannot rerun or flip it.
+- Detached-process shutdown verifies the session and per-launch task token
+  before signaling a token-bearing process group. Orphaned provider processes
+  retain their worktree until ownership is reconciled, preventing stale or
+  reused PIDs from targeting an unrelated process or triggering unsafe cleanup.
+- Parent launch acknowledgement can no longer overwrite a child-promoted
+  driver process-group PID; helper-to-driver promotion uses a compare-and-swap
+  on the expected helper PID for workers, feedback turns, and reviewers.
+- Process mode fails closed on native Windows until equivalent token-verifiable
+  process ownership is available; macOS, Linux, and WSL remain supported.
+- Closed, unmerged pull requests now fail their process-runner session instead
+  of being reported as open and entering a futile review loop.
+- `oa model doctor` now resolves the process runner's configured harness
+  command, including wrapper arguments, instead of assuming a default binary
+  name on `PATH`.
+- Claude's default credential profile now explicitly clears an inherited
+  `CLAUDE_CONFIG_DIR`, preventing the service account from leaking into a
+  worker or reviewer.
+- Codex `--approve-for-me` no longer conflicts with an explicit `--sandbox`
+  flag; configuration rejects incompatible sandbox choices.
+- Successful agent exits receive a bounded pull-request discovery window
+  instead of failing on transient GitHub visibility latency or waiting forever.
+
+### Compatibility
+
+- `runner.type = "ao"` remains the default and existing project TOML files do
+  not require migration.
+- Process mode is opt-in with `runner.type = "process"`. It uses the same graph,
+  policy, registry, account commands, approval gates, and GitHub tracker.
+
 ## 0.2.1 - 2026-09-01
 
 ### Fixed

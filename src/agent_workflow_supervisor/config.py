@@ -23,8 +23,56 @@ class ProjectConfig(BaseModel):
 
 
 class RunnerConfig(BaseModel):
-    type: Literal["ao"] = "ao"
+    type: Literal["ao", "process"] = "ao"
     command: str = "ao"
+    repository_path: Path | None = None
+    worktree_root: Path | None = None
+    git_command: str = "git"
+    verify_repository_remote: bool = True
+    review_harness: str = "claude-code"
+    review_model: str | None = None
+    review_provider: str | None = None
+    review_credential_profile: str | None = None
+    pr_discovery_timeout_seconds: float = Field(default=120.0, ge=5.0, le=1800.0)
+    claude_permission_mode: Literal[
+        "default",
+        "acceptEdits",
+        "plan",
+        "dontAsk",
+        "bypassPermissions",
+    ] = "acceptEdits"
+    claude_allowed_tools: list[str] = Field(default_factory=list)
+    codex_sandbox: Literal["read-only", "workspace-write", "danger-full-access"] = "workspace-write"
+    codex_approve_for_me: bool = True
+    commands: dict[str, str] = Field(
+        default_factory=lambda: {
+            "claude-code": "claude",
+            "codex": "codex",
+            "opencode": "opencode",
+        }
+    )
+
+    @model_validator(mode="after")
+    def validate_process_runner(self) -> RunnerConfig:
+        if self.type != "process":
+            return self
+        missing = {
+            name for name in {"claude-code", "codex", "opencode"} if not self.commands.get(name)
+        }
+        if missing:
+            raise ValueError(f"process runner commands are missing: {sorted(missing)}")
+        if self.review_harness not in self.commands:
+            raise ValueError(
+                f"process review_harness has no command mapping: {self.review_harness!r}"
+            )
+        if self.review_harness not in {"claude-code", "codex"}:
+            raise ValueError(
+                "process review_harness must be 'claude-code' or 'codex' so the "
+                "reviewer can be forced into a read-only mode"
+            )
+        if self.codex_approve_for_me and self.codex_sandbox != "workspace-write":
+            raise ValueError("codex_approve_for_me requires codex_sandbox = 'workspace-write'")
+        return self
 
 
 class TrackerConfig(BaseModel):
@@ -36,9 +84,9 @@ class TrackerConfig(BaseModel):
 class CredentialProfileConfig(BaseModel):
     """Non-secret pointer to an isolated runner configuration.
 
-    AO does not expose per-spawn environment overrides. Each Claude login must
-    therefore be represented by a separate AO project whose project-level
-    environment selects a distinct CLAUDE_CONFIG_DIR.
+    AO uses a distinct execution project for each Claude login. The process
+    runner uses the same logical id for capacity accounting and injects the
+    selected ``CLAUDE_CONFIG_DIR`` into only that worker process.
     """
 
     execution_project_id: str = Field(min_length=1)
@@ -137,6 +185,9 @@ class AppConfig(BaseModel):
         )
         if missing_routes:
             raise ValueError(f"route model profiles are not configured: {missing_routes}")
+        review_profile = self.runner.review_credential_profile
+        if review_profile is not None and review_profile not in configured:
+            raise ValueError(f"review credential profile is not configured: {review_profile!r}")
         return self
 
 
@@ -189,6 +240,29 @@ def load_config(path: str | Path, *, registry_path: Path | None = None) -> AppCo
         config.supervisor.runtime_dir = (
             config_path.parent / config.supervisor.runtime_dir
         ).resolve()
+    if config.runner.repository_path is None and config.runner.type == "process":
+        config.runner.repository_path = config_path.parent
+    elif config.runner.repository_path is not None:
+        config.runner.repository_path = config.runner.repository_path.expanduser()
+        if not config.runner.repository_path.is_absolute():
+            config.runner.repository_path = (
+                config_path.parent / config.runner.repository_path
+            ).resolve()
+    if config.runner.worktree_root is None and config.runner.type == "process":
+        config.runner.worktree_root = (
+            Path.home()
+            / ".local"
+            / "share"
+            / "agent-workflow-supervisor"
+            / "worktrees"
+            / config.project.id
+        )
+    elif config.runner.worktree_root is not None:
+        config.runner.worktree_root = config.runner.worktree_root.expanduser()
+        if not config.runner.worktree_root.is_absolute():
+            config.runner.worktree_root = (
+                config_path.parent / config.runner.worktree_root
+            ).resolve()
     for profile in config.credentials.profiles.values():
         if profile.claude_config_dir is not None:
             profile.claude_config_dir = profile.claude_config_dir.expanduser()

@@ -102,8 +102,39 @@ command = "gh"
 repository = "owner/repository"
 ```
 
-The configured project id must match the AO project id. The built-in tracker
-accepts one `owner/repository` GitHub repository.
+In AO mode, the configured project id must match the AO project id. The
+built-in tracker accepts one `owner/repository` GitHub repository.
+
+To run without AO, select the process adapter and identify the source checkout:
+
+```toml
+[runner]
+type = "process"
+repository_path = "/absolute/path/to/repository"
+worktree_root = "/absolute/path/to/agent-worktrees"
+review_harness = "claude-code"
+review_model = "claude-sonnet-5"
+pr_discovery_timeout_seconds = 120
+verify_repository_remote = true
+claude_allowed_tools = ["Bash(git *)", "Bash(gh *)"]
+
+[runner.commands]
+claude-code = "claude"
+codex = "codex"
+opencode = "opencode"
+```
+
+In process mode, `review_harness` must be `claude-code` or `codex`; reviewer
+permissions are always reduced to read-only settings. Claude implementation
+workers using `acceptEdits` also need explicit `claude_allowed_tools` grants
+for the project-specific shell commands they must run.
+
+Relative runner paths resolve from the project TOML. `oa setup` writes their
+resolved absolute values into the installed copy. See
+[Running without AO](process-runner.md) for driver permissions and lifecycle.
+`verify_repository_remote` should remain enabled for real GitHub projects; it
+prevents a tracker configuration from supervising the wrong checkout. Disable
+it only for controlled local fixtures whose `origin` is not a GitHub URL.
 
 ### Legacy harness policy
 
@@ -218,7 +249,7 @@ same login share one `max_workers` budget.
 
 ## Credential profiles
 
-Credential profiles are non-secret pointers to AO execution projects:
+Credential profiles are non-secret runner identities:
 
 ```toml
 [credentials]
@@ -245,12 +276,12 @@ update may leave older entries under `credentials.profiles`; they are retained
 only so active workers in retired AO execution projects remain discoverable.
 Do not delete those entries manually while such workers exist.
 
-## Settings owned by AO and the harness
+## Settings owned by the runner and harness
 
-The project TOML does not configure the AO orchestrator's model, reasoning
-effort, or permission mode. Those settings remain in AO's project
-configuration. Harness/provider login, API endpoints, context limits, and tool
-permissions also remain owned by the harness or provider.
+In AO mode, the project TOML does not configure the AO orchestrator's model,
+reasoning effort, or permission mode. Those settings remain in AO's project
+configuration. Harness/provider login, API endpoints, context limits, and most
+tool permissions remain owned by the harness or provider in either mode.
 
 The supervisor controls worker routing and may pass a selected worker `--model`
 to AO. It does not reinterpret AO's `auto`, `accept edits`, or other permission
@@ -258,6 +289,12 @@ modes, and changing a supervisor model profile does not change the
 orchestrator's model or effort. A direct `oa project bind-account` preserves the
 rest of the existing AO project configuration while changing only
 `CLAUDE_CONFIG_DIR`.
+
+Process mode has explicit noninteractive driver controls:
+`runner.claude_permission_mode`, `runner.claude_allowed_tools`,
+`runner.codex_sandbox`, and `runner.codex_approve_for_me`. The safe defaults
+avoid unrestricted bypass flags. Provider login and model-server configuration
+still remain outside this project.
 
 ## Validation and effective configuration
 

@@ -1,0 +1,41 @@
+[supervisor]
+database_path = ".state/checkpoints.sqlite"
+runtime_dir = ".state/runtime"
+poll_interval_seconds = 5
+review_timeout_seconds = 1800
+review_max_attempts = 2
+shadow_mode = true
+
+[project]
+id = "my-project"
+
+[runner]
+type = "process"
+repository_path = "."
+worktree_root = "../agent-worktrees"
+review_harness = "claude-code"
+claude_permission_mode = "acceptEdits"
+claude_allowed_tools = ["Bash(git *)", "Bash(gh *)"]
+codex_sandbox = "workspace-write"
+codex_approve_for_me = true
+
+[runner.commands]
+claude-code = "claude"
+codex = "codex"
+opencode = "opencode"
+
+[tracker]
+type = "github"
+command = "gh"
+repository = "owner/repository"
+
+[policy]
+merge_mode = "manual"
+default_harness = "claude-code"
+skip_labels = ["agent:skip"]
+approval_labels = []
+
+[policy.capacity]
+claude-code = 1
+codex = 1
+opencode = 1

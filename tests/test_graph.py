@@ -48,7 +48,10 @@ class FakeRunner:
         self.terminated: list[str] = []
         self.spawn_calls: list[tuple[str, str | None]] = []
         self.spawn_details: list[tuple[str, str | None]] = []
+        self.spawn_providers: list[str | None] = []
         self.prompts: list[str] = []
+        self.messages: list[tuple[str, str]] = []
+        self.send_result = True
 
     def list_sessions(self, project_id: str) -> list[AgentSession]:
         return [session for session in self.sessions if session.project_id == project_id]
@@ -56,10 +59,21 @@ class FakeRunner:
     def get_session(self, session_id: str) -> AgentSession | None:
         return next((session for session in self.sessions if session.id == session_id), None)
 
-    def spawn_worker(self, *, project_id, work_item, harness, model, credential_profile, prompt):
+    def spawn_worker(
+        self,
+        *,
+        project_id,
+        work_item,
+        harness,
+        model,
+        provider,
+        credential_profile,
+        prompt,
+    ):
         self.spawned += 1
         self.spawn_calls.append((project_id, credential_profile))
         self.spawn_details.append((harness, model))
+        self.spawn_providers.append(provider)
         self.prompts.append(prompt)
         session = AgentSession(
             f"worker-{self.spawned}",
@@ -81,8 +95,9 @@ class FakeRunner:
     def cancel_review(self, session_id: str) -> None:
         self.cancelled_reviews.append(session_id)
 
-    def send(self, session_id: str, message: str) -> None:
-        pass
+    def send(self, session_id: str, message: str) -> bool:
+        self.messages.append((session_id, message))
+        return self.send_result
 
     def terminate(self, project_id: str, session_id: str) -> None:
         self.terminated.append(session_id)
@@ -161,6 +176,97 @@ def test_shadow_mode_plans_without_spawning() -> None:
 
     assert result["status"] == "planned_worker"
     assert runner.spawned == 0
+
+
+def test_changes_requested_feedback_is_returned_to_worker() -> None:
+    item = WorkItem("1", "code")
+    review = ReviewResult(
+        status="completed",
+        verdict="changes_requested",
+        feedback="Add a regression test for the failing edge case.",
+        change_id="8",
+        change_url="https://github.com/owner/repo/pull/8",
+        target_sha="abc",
+    )
+    runner = FakeRunner(item, review)
+    runner.sessions = [
+        AgentSession(
+            "worker-1",
+            "worker",
+            "pr_open",
+            "claude-code",
+            work_item_id="1",
+            project_id="demo",
+        )
+    ]
+    graph = build_supervisor_graph(
+        SupervisorDependencies(config(shadow=False), runner, FakeTracker(item)),
+        InMemorySaver(),
+    )
+
+    result = graph.invoke(
+        {"project_id": "demo", "work_item_id": "1", "events": []},
+        config=run_config("feedback"),
+    )
+
+    assert result["status"] == "worker_running"
+    assert runner.messages == [
+        (
+            "worker-1",
+            "Review changes were requested for https://github.com/owner/repo/pull/8. "
+            "Add a regression test for the failing edge case.\n\n"
+            "Fix the findings, verify the result, and push updates to the same pull request.",
+        )
+    ]
+
+    repeated = graph.invoke(
+        {"project_id": "demo", "work_item_id": "1", "events": []},
+        config=run_config("feedback"),
+    )
+    assert repeated["status"] == "worker_running"
+    assert len(runner.messages) == 1
+
+
+def test_unaccepted_feedback_is_not_checkpointed_as_sent() -> None:
+    item = WorkItem("1", "code")
+    review = ReviewResult(
+        status="completed",
+        verdict="changes_requested",
+        feedback="Retry this feedback.",
+        change_id="8",
+        change_url="https://github.com/owner/repo/pull/8",
+        target_sha="abc",
+        run_id="review-run",
+    )
+    runner = FakeRunner(item, review)
+    runner.send_result = False
+    runner.sessions = [
+        AgentSession(
+            "worker-1",
+            "worker",
+            "pr_open",
+            "claude-code",
+            work_item_id="1",
+            project_id="demo",
+        )
+    ]
+    graph = build_supervisor_graph(
+        SupervisorDependencies(config(shadow=False), runner, FakeTracker(item)),
+        InMemorySaver(),
+    )
+
+    first = graph.invoke(
+        {"project_id": "demo", "work_item_id": "1", "events": []},
+        config=run_config("feedback-not-accepted"),
+    )
+    second = graph.invoke(
+        {"project_id": "demo", "work_item_id": "1", "events": []},
+        config=run_config("feedback-not-accepted"),
+    )
+
+    assert first["status"] == "changes_requested"
+    assert second["status"] == "changes_requested"
+    assert len(runner.messages) == 2
 
 
 def test_existing_worker_is_reused_even_when_harness_is_at_capacity() -> None:
@@ -1368,7 +1474,12 @@ def test_model_profile_is_passed_to_ao_runner() -> None:
     profile_config.policy.default_model_profile = "claude"
     profile_config.policy.model_profiles = {
         "claude": ModelProfileConfig(harness="claude-code", model="claude-sonnet", capacity=2),
-        "local": ModelProfileConfig(harness="opencode", model="ollama/qwen3-coder", capacity=1),
+        "local": ModelProfileConfig(
+            harness="opencode",
+            model="ollama/qwen3-coder",
+            provider="ollama",
+            capacity=1,
+        ),
     }
     profile_config.policy.routes.insert(0, RouteRule(profile="local", labels_any={"agent:local"}))
     graph = build_supervisor_graph(
@@ -1382,6 +1493,7 @@ def test_model_profile_is_passed_to_ao_runner() -> None:
 
     assert result["model_profile"] == "local"
     assert runner.spawn_details == [("opencode", "ollama/qwen3-coder")]
+    assert runner.spawn_providers == ["ollama"]
 
 
 def test_report_only_worker_completes_without_review_or_pull_request() -> None:

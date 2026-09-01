@@ -7,6 +7,12 @@ The existing AO project's ordinary Claude login remains the default profile and
 does not receive an explicit `CLAUDE_CONFIG_DIR`. Only additional logins get an
 isolated configuration directory.
 
+With `runner.type = "process"`, the same account commands inject the selected
+`CLAUDE_CONFIG_DIR` into each Claude subprocess. No extra clone or AO project is
+created. The default profile explicitly clears any `CLAUDE_CONFIG_DIR`
+inherited from the supervisor service, so it cannot silently use a different
+account. See [Running without AO](process-runner.md#multiple-claude-logins).
+
 ## Switch from the AO conversation
 
 After the project has been integrated, tell its AO orchestrator:
@@ -96,9 +102,9 @@ variables from project configuration into sessions, but AO 0.12.9 has no
 per-spawn environment flag. It also rejects registering the same filesystem path
 twice. Each isolated login therefore needs a separate local clone and AO project.
 
-This is an AO adapter constraint, not a LangGraph constraint. A future direct
-Claude runner adapter can inject a profile environment independently for each
-process.
+This is an AO adapter constraint, not a LangGraph constraint. The process
+runner injects a profile environment independently for each process and does
+not use the clone strategy described in this section.
 
 ## One-time setup
 
@@ -126,8 +132,9 @@ oa project accounts game-project
 ```
 
 The project-assignment step creates a dedicated execution checkout only when AO
-needs one for a non-default login. Its path is intentionally structured as
-`execution-projects/<project>/<account>`.
+needs one for a non-default login. Process mode creates only logical profile
+identities and uses its normal per-worker worktrees. AO checkout paths are
+intentionally structured as `execution-projects/<project>/<account>`.
 
 Assignment is also reconciliation. On every run, the supervisor verifies that
 an existing derived AO project points to that managed checkout and reapplies

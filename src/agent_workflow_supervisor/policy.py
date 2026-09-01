@@ -14,11 +14,18 @@ class ModelSelection:
     harness: str
     model: str | None
     capacity: int | None = None
+    provider: str | None = None
 
 
 def _selection_for_profile(name: str, policy: PolicyConfig) -> ModelSelection:
     profile = policy.model_profiles[name]
-    return ModelSelection(name, profile.harness, profile.model, profile.capacity)
+    return ModelSelection(
+        name,
+        profile.harness,
+        profile.model,
+        profile.capacity,
+        profile.provider,
+    )
 
 
 def select_model(item: WorkItem, policy: PolicyConfig) -> ModelSelection | None:
