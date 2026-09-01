@@ -178,9 +178,11 @@ implementations are `AoRunner`, `ProcessRunner`, and `GitHubTracker`. A new
 runner or tracker should translate its native state into the domain values in
 `models.py`; the graph should not import provider SDKs directly.
 
-The AO adapter uses structured chat mode for chat-capable harnesses. AO 0.12.9
-exposes Antigravity (`agy`) only through its TUI driver, so that harness is
-spawned in TUI mode while retaining the same durable workflow state.
+The AO adapter does not select a session interface. It omits `--mode` when it
+spawns workers or replacement orchestrators, leaving AO to choose its native
+default for the project and harness. The durable workflow observes session and
+review state through AO's CLI, and supervisor updates use AO's mode-aware
+`send` command, so neither TUI nor Chat is required by the supervisor.
 
 `oa setup`, `oa project register`, and account-pool assignment manage one
 delimited block of AO orchestrator rules. Operator rules outside the block are

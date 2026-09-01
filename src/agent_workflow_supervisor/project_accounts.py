@@ -667,8 +667,6 @@ def _bind_ao_project_account_unlocked(
             "orchestrator",
             "--name",
             f"orchestrator-{uuid.uuid4().hex[:8]}",
-            "--mode",
-            "chat",
         ]
         if replacement_prompt:
             spawn_args.extend(["--prompt", replacement_prompt])

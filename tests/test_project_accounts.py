@@ -436,6 +436,7 @@ def test_bind_project_account_replaces_orchestrator_after_config_is_saved(monkey
     )
     spawn_index = next(index for index, call in enumerate(adapter.calls) if call[0] == "spawn")
     assert config_index < kill_index < spawn_index
+    assert "--mode" not in adapter.calls[spawn_index]
     assert result["orchestrator_session"] == "demo-2"
     assert result["replaced_orchestrators"] == ["demo-1"]
     assert result["active_sessions_still_using_previous_account"] == []

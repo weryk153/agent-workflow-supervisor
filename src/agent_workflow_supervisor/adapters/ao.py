@@ -63,10 +63,6 @@ class AoRunner:
         prompt: str,
     ) -> AgentSession:
         safe_id = re.sub(r"[^A-Za-z0-9]+", "-", work_item.id).strip("-") or "work"
-        # Antigravity is currently exposed by AO as a TUI-only harness. The
-        # other built-in integrations used by the supervisor have chat
-        # drivers, which provide structured conversation handling.
-        mode = "tui" if harness == "agy" else "chat"
         args = [
             "spawn",
             "--project",
@@ -79,8 +75,6 @@ class AoRunner:
             harness,
             "--issue",
             work_item.id,
-            "--mode",
-            mode,
             "--prompt",
             prompt,
         ]

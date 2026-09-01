@@ -81,9 +81,10 @@ oa model doctor PROFILE --project my-project
 executable is present. Some local harnesses report an unknown auth state and
 still work; the spawn runtime remains the final validation.
 
-If AO reports `SESSION_MODE_UNSUPPORTED` for `agy`, upgrade the supervisor to
-a version that spawns Antigravity through AO's TUI mode. Antigravity may still
-show `authStatus: unknown`; a disposable read-only spawn is the authoritative
+The supervisor leaves session-mode selection to AO instead of forcing Chat or
+TUI. If AO reports `SESSION_MODE_UNSUPPORTED`, verify the harness with the AO
+version installed on that machine. Antigravity may still show
+`authStatus: unknown`; a disposable read-only spawn is the authoritative
 runtime check.
 
 ## OpenCode cannot see a local model

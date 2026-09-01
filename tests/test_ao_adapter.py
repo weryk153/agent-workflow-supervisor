@@ -28,11 +28,8 @@ class FakeCommandAdapter:
         }
 
 
-@pytest.mark.parametrize(
-    ("harness", "expected_mode"),
-    [("agy", "tui"), ("claude-code", "chat")],
-)
-def test_spawn_uses_supported_mode(monkeypatch, harness: str, expected_mode: str) -> None:
+@pytest.mark.parametrize("harness", ["agy", "claude-code"])
+def test_spawn_preserves_ao_native_mode_selection(monkeypatch, harness: str) -> None:
     monkeypatch.setattr(ao_module, "CommandAdapter", FakeCommandAdapter)
     runner = AoRunner("ao")
 
@@ -47,7 +44,7 @@ def test_spawn_uses_supported_mode(monkeypatch, harness: str, expected_mode: str
     )
 
     call = runner.cli.calls[0]
-    assert call[call.index("--mode") + 1] == expected_mode
+    assert "--mode" not in call
     assert session.harness == harness
 
 

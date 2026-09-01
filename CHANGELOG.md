@@ -14,6 +14,13 @@ with an explicit migration note.
   failures remain visible without changing workflow status, and a replaced
   origin falls back only to a single unambiguous active orchestrator.
 
+### Fixed
+
+- AO sessions created by the supervisor no longer force Chat or TUI mode.
+  Worker spawns and account-switch replacement orchestrators now preserve AO's
+  native mode selection, while durable reports continue through AO's
+  mode-aware send channel.
+
 ### Compatibility
 
 - Existing `jobs.sqlite` databases add nullable notification columns
