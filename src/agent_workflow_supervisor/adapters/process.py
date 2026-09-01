@@ -82,7 +82,7 @@ def _process_table() -> dict[int, str]:
     if os.name != "posix":
         return {}
     completed = subprocess.run(
-        ["ps", "-ax", "-o", "pid=,command="],
+        ["ps", "-axww", "-o", "pid=,command="],
         check=False,
         capture_output=True,
         text=True,
