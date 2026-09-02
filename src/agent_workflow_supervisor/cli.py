@@ -14,6 +14,7 @@ from tomlkit import parse as toml_parse
 
 from agent_workflow_supervisor.accounts import add_claude_account, list_claude_accounts
 from agent_workflow_supervisor.adapters.ao import AoRunner
+from agent_workflow_supervisor.ao_relay import native_relay_status
 from agent_workflow_supervisor.config import AppConfig, load_config
 from agent_workflow_supervisor.identifiers import canonical_github_issue_id
 from agent_workflow_supervisor.model_health import diagnose_model_profile
@@ -809,6 +810,11 @@ def status(
                 "project_id": config.project.id,
                 "shadow_mode": config.supervisor.shadow_mode,
                 "merge_mode": config.policy.merge_mode,
+                "ao_native_relay": (
+                    {"enabled": True, **native_relay_status()}
+                    if config.runner.type == "ao" and config.supervisor.ao_native_relay
+                    else {"enabled": False}
+                ),
                 "jobs": [job_as_dict(job) for job in store.list()],
             }
         )

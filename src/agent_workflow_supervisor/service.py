@@ -24,6 +24,7 @@ from langgraph.types import Command
 
 from agent_workflow_supervisor.adapters.ao import AoRunner
 from agent_workflow_supervisor.adapters.command import AdapterCommandError, CommandAdapter
+from agent_workflow_supervisor.ao_relay import NativeAoRelay
 from agent_workflow_supervisor.config import AppConfig, load_config
 from agent_workflow_supervisor.identifiers import canonical_github_issue_id
 from agent_workflow_supervisor.registry import REGISTRY_PATH
@@ -899,6 +900,11 @@ def serve(config_path: Path, instance_token: str) -> None:
         )
         _write_service_record(config, record)
         store = JobStore(config.supervisor.runtime_dir)
+        native_relay = (
+            NativeAoRelay(config.runner.command)
+            if config.runner.type == "ao" and config.supervisor.ao_native_relay
+            else None
+        )
         print(json.dumps({"event": "service_started", "pid": os.getpid()}), flush=True)
         try:
             while not stopping:
@@ -923,6 +929,19 @@ def serve(config_path: Path, instance_token: str) -> None:
                                 break
                             reconcile_job(config, store, job)
                 deliver_pending_notifications(config, store)
+                if native_relay is not None:
+                    try:
+                        native_relay.reconcile()
+                    except Exception as error:
+                        print(
+                            json.dumps(
+                                {
+                                    "event": "ao_native_relay_error",
+                                    "error": f"{type(error).__name__}: {error}",
+                                }
+                            ),
+                            flush=True,
+                        )
                 deadline = time.monotonic() + config.supervisor.poll_interval_seconds
                 while not stopping and time.monotonic() < deadline:
                     time.sleep(min(0.25, deadline - time.monotonic()))

@@ -22,7 +22,7 @@ or from an intentional automation.
 |---|---|
 | `oa start [--project ID]` | Ensures the configured runner is ready and starts the supervisor. |
 | `oa stop [--project ID]` | Stops only the supervisor process. |
-| `oa status [--project ID]` | Shows service and queue status. |
+| `oa status [--project ID]` | Shows service, queue, and AO-native relay status. |
 | `oa status --work-item N [--project ID]` | Also shows the LangGraph checkpoint. |
 | `oa dispatch N [--project ID]` | Idempotently queues one issue and starts the service. |
 | `oa tick --work-item N [--project ID]` | Runs one reconciliation pass. |
@@ -38,6 +38,10 @@ orchestrator. Approval gates, completion, and actionable blockers are then sent
 back to that live conversation once per durable state transition. Dispatch from
 an external terminal does not invent a notification target and remains
 headless.
+
+When `supervisor.ao_native_relay` is enabled, the same status output includes
+the global relay database, tracked-worker count, pending deliveries, and recent
+binding or delivery errors.
 
 For the built-in GitHub tracker, `194`, `#194`,
 `github:owner/repository#194`, and that repository's full GitHub issue URL are

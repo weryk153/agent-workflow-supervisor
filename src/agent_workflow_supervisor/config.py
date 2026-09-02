@@ -15,6 +15,7 @@ class SupervisorConfig(BaseModel):
     poll_interval_seconds: float = Field(default=5.0, ge=1.0, le=300.0)
     review_timeout_seconds: float = Field(default=1800.0, ge=60.0, le=86400.0)
     review_max_attempts: int = Field(default=2, ge=1, le=10)
+    ao_native_relay: bool = True
     shadow_mode: bool = True
 
 

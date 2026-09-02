@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import io
+
 import pytest
 
 import agent_workflow_supervisor.adapters.ao as ao_module
@@ -90,4 +92,45 @@ def test_review_uses_latest_run_liveness_and_can_cancel(monkeypatch) -> None:
     assert runner.cli.calls == [
         ("review", "ls", "demo-1", "--json"),
         ("review", "cancel", "demo-1"),
+    ]
+
+
+class ConversationCommandAdapter:
+    def __init__(self, _command: str) -> None:
+        pass
+
+    def run_json(self, *args: str) -> dict:
+        assert args == ("status", "--json")
+        return {"port": 3456}
+
+
+class ConversationResponse(io.BytesIO):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args) -> None:
+        self.close()
+
+
+def test_conversation_messages_use_ao_local_api(monkeypatch) -> None:
+    monkeypatch.setattr(ao_module, "CommandAdapter", ConversationCommandAdapter)
+    requested: list[tuple[str, int]] = []
+
+    def fake_urlopen(url: str, timeout: int):
+        requested.append((url, timeout))
+        return ConversationResponse(
+            b'{"messages":[{"sequence":7,"role":"assistant","origin":"provider","text":"Done"}]}'
+        )
+
+    monkeypatch.setattr(ao_module.urllib.request, "urlopen", fake_urlopen)
+    runner = AoRunner("ao")
+
+    messages = runner.conversation_messages("demo/worker", limit=20)
+
+    assert messages == [{"sequence": 7, "role": "assistant", "origin": "provider", "text": "Done"}]
+    assert requested == [
+        (
+            "http://127.0.0.1:3456/api/v1/sessions/demo%2Fworker/conversation?limit=20",
+            5,
+        )
     ]

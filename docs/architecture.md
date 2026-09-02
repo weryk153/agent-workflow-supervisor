@@ -115,6 +115,9 @@ new work from repository labels and does not scan the issue tracker.
 
 - `jobs.sqlite` stores the explicit dispatch queue, its originating AO session
   when present, and durable notification/deduplication state.
+- The user-global `.state/ao-native-relay.sqlite` stores native AO
+  worker-to-orchestrator bindings and lifecycle delivery checkpoints. A global
+  lock serializes relay work when several project supervisors are running.
 - The configured LangGraph SQLite database stores workflow checkpoints.
 - AO stores its execution sessions and worktrees independently. Process mode
   stores equivalent metadata in `process-runner/state.sqlite` and owns its git

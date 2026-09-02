@@ -81,6 +81,15 @@ Dispatch from an external terminal has no originating AO conversation and
 therefore remains headless; inspect it with `oa status` or an intentional
 automation.
 
+The separate native AO relay covers workers created through ordinary
+`ao spawn`, even when their project has no supervisor workflow configuration.
+It first looks for AO's structural automation messages to identify the sender.
+If none exists, it binds only when that project has exactly one active
+orchestrator. Chat workers contribute their latest structured provider reply;
+TUI workers still report lifecycle state without fabricating unavailable
+output. Relayed worker text is explicitly quoted as untrusted, read-only data,
+and delivery never changes either session's interface mode.
+
 An approval request succeeds only while the workflow is paused for the exact
 change id and head SHA shown by that gate. Sending “approve” early does not queue
 permission for a future pull request.

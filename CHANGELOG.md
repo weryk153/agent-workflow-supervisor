@@ -13,6 +13,11 @@ with an explicit migration note.
   conversation. Notification state is persisted for duplicate suppression,
   failures remain visible without changing workflow status, and a replaced
   origin falls back only to a single unambiguous active orchestrator.
+- Native AO workers created outside `oa dispatch` are now observed by a
+  durable, AO-wide lifecycle relay. A worker is bound only through a proven AO
+  automation sender or the sole active orchestrator in its project; idle,
+  attention, and terminal updates are delivered through AO's native `send`
+  channel with persistent duplicate suppression and replacement fallback.
 
 ### Fixed
 
@@ -26,6 +31,9 @@ with an explicit migration note.
 - Existing `jobs.sqlite` databases add nullable notification columns
   automatically. Existing jobs and dispatches from external terminals remain
   headless because no origin session can be proven.
+- Native relay state is stored in the user-global
+  `.state/ao-native-relay.sqlite`. Existing active workers are adopted without
+  replaying old output; later lifecycle transitions are reported normally.
 
 ## 0.3.0 - 2026-09-01
 

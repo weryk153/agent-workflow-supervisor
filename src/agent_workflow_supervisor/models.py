@@ -24,6 +24,10 @@ class AgentSession:
     terminated: bool = False
     work_item_id: str | None = None
     project_id: str | None = None
+    display_name: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+    last_activity_at: str = ""
 
     @property
     def active(self) -> bool:

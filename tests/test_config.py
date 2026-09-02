@@ -36,6 +36,7 @@ repository = "owner/repo"
     assert config.policy.report_only_harnesses == set()
     assert config.supervisor.review_timeout_seconds == 1800
     assert config.supervisor.review_max_attempts == 2
+    assert config.supervisor.ao_native_relay is True
 
 
 def test_config_rejects_unknown_merge_mode(tmp_path: Path) -> None:

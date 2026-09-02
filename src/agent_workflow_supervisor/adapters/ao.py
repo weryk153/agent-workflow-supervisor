@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import re
+import urllib.error
+import urllib.parse
+import urllib.request
+from typing import Any
 
 from agent_workflow_supervisor.adapters.command import AdapterCommandError, CommandAdapter
 from agent_workflow_supervisor.identifiers import canonical_github_issue_id
@@ -29,6 +34,12 @@ class AoRunner:
             terminated=bool(raw.get("isTerminated", False)),
             work_item_id=work_item_id,
             project_id=str(raw.get("projectId") or project_id or "") or None,
+            display_name=str(raw.get("displayName") or ""),
+            created_at=str(raw.get("createdAt") or ""),
+            updated_at=str(raw.get("updatedAt") or ""),
+            last_activity_at=str(
+                raw.get("lastActivityAt") or (raw.get("activity") or {}).get("lastActivityAt") or ""
+            ),
         )
 
     def list_sessions(self, project_id: str) -> list[AgentSession]:
@@ -42,6 +53,10 @@ class AoRunner:
             "--json",
         )
         return [self._session(item, project_id) for item in response.get("data", [])]
+
+    def list_active_sessions(self) -> list[AgentSession]:
+        response = self.cli.run_json("session", "ls", "--all", "--json")
+        return [self._session(item) for item in response.get("data", [])]
 
     def get_session(self, session_id: str) -> AgentSession | None:
         try:
@@ -124,6 +139,31 @@ class AoRunner:
     def send(self, session_id: str, message: str) -> bool:
         self.cli.run("send", "--session", session_id, "--message", message)
         return True
+
+    def conversation_messages(self, session_id: str, *, limit: int = 200) -> list[dict[str, Any]]:
+        status = self.cli.run_json("status", "--json")
+        port = int(status.get("port") or 0)
+        if port <= 0:
+            raise AdapterCommandError("AO status did not include a valid daemon port")
+        encoded_session = urllib.parse.quote(session_id, safe="")
+        url = (
+            f"http://127.0.0.1:{port}/api/v1/sessions/{encoded_session}/conversation?limit={limit}"
+        )
+        try:
+            with urllib.request.urlopen(url, timeout=5) as response:
+                payload = json.load(response)
+        except urllib.error.HTTPError as error:
+            if error.code in {404, 409}:
+                return []
+            raise AdapterCommandError(
+                f"AO conversation request failed for {session_id}: HTTP {error.code}"
+            ) from error
+        except (OSError, ValueError) as error:
+            raise AdapterCommandError(
+                f"AO conversation request failed for {session_id}: {error}"
+            ) from error
+        messages = payload.get("messages", []) if isinstance(payload, dict) else []
+        return [message for message in messages if isinstance(message, dict)]
 
     def terminate(self, project_id: str, session_id: str) -> None:
         self.cli.run("session", "kill", session_id, "--project", project_id)

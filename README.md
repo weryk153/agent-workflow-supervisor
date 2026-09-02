@@ -44,9 +44,10 @@ use the same `oa` status, dispatch, and approval interface.
 - **Review and CI awareness** — delivery advances only when the current change
   has the required review and checks; a bounded watchdog recovers failed or
   timed-out reviewers instead of waiting silently forever.
-- **Live AO reporting** — work dispatched from an AO orchestrator reports
-  approval gates, terminal outcomes, and actionable blockers back to that
-  conversation with durable duplicate suppression.
+- **Live AO reporting** — supervised workflows and native AO workers report
+  completion, attention states, approval gates, and actionable blockers back
+  to the originating orchestrator through AO's own message channel, with
+  durable duplicate suppression.
 - **User-selected merge control** — each project chooses automatic merge or a
   manual, head-bound approval gate; protected labels always pause.
 - **Guarded merge** — stale approval cannot merge a newer, unreviewed commit.
@@ -78,8 +79,12 @@ Once a project is integrated, open its orchestrator in AO and ask naturally:
 The managed AO rules translate these explicit requests into supervisor actions
 and summarize the result in the same conversation. The background supervisor
 also returns approval gates, completion, and actionable blockers to the
-orchestrator session that dispatched the work. Discussing or planning an issue
-does not start it; the user must clearly authorize execution.
+orchestrator session that dispatched the work. Its AO-wide native relay also
+observes workers created through ordinary `ao spawn`: it uses an automation
+sender when available, otherwise requires exactly one active orchestrator in
+the worker's project, and never changes the worker's TUI or Chat mode.
+Discussing or planning an issue does not start it; the user must clearly
+authorize execution.
 
 The terminal is reserved for initial installation, interactive login,
 automation, and recovery. Day-to-day supervision does not require users to

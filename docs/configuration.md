@@ -73,6 +73,7 @@ runtime_dir = ".state/runtime"
 poll_interval_seconds = 5
 review_timeout_seconds = 1800
 review_max_attempts = 2
+ao_native_relay = true
 shadow_mode = true
 ```
 
@@ -84,6 +85,11 @@ shadow_mode = true
   is exhausted, the workflow stays active as `review_stalled` without starting
   more reviewers. A new commit or an explicitly started AO review resets the
   budget.
+- `ao_native_relay` observes native AO workers across registered AO projects.
+  It binds a worker only to an orchestrator proven by an AO automation sender
+  or to the sole active orchestrator in that project, then relays idle,
+  attention, and terminal updates through AO's own `send` channel. Disable it
+  when another service owns that responsibility.
 - Shadow mode blocks external mutations but still permits reads.
 
 ### Project, runner, and tracker

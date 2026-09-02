@@ -37,6 +37,7 @@ def test_generated_project_config_starts_in_shadow_mode() -> None:
     )
 
     assert document["supervisor"]["shadow_mode"] is True
+    assert document["supervisor"]["ao_native_relay"] is True
     assert document["project"]["id"] == "demo"
     assert document["policy"]["merge_mode"] == "manual"
     assert document["policy"]["capacity"]["claude-code"] == 1

@@ -82,6 +82,7 @@ def _new_project_config(
     supervisor.add("database_path", f".state/{project_id}/checkpoints.sqlite")
     supervisor.add("runtime_dir", f".state/{project_id}/runtime")
     supervisor.add("poll_interval_seconds", 5)
+    supervisor.add("ao_native_relay", True)
     supervisor.add("shadow_mode", True)
     value["supervisor"] = supervisor
 
